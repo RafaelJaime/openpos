@@ -861,6 +861,8 @@
     "editCategory": "Edit Category",
     "categoryName": "Category name",
     "categoryImage": "Image",
+    "order": "Order",
+    "orderHelp": "Higher shows first; ties are sorted A-Z.",
     "uploadImage": "Upload image",
     "changeImage": "Change image",
     "removeImage": "Remove",

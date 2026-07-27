@@ -4,6 +4,7 @@ export interface Category {
   id: string
   name: string
   image?: string
+  sortOrder: number
   isActive: boolean
   createdAt: string
   updatedAt: string
@@ -13,10 +14,14 @@ interface DatabaseCategory {
   id: number
   name: string
   image?: string
+  sort_order: number
   is_active: number
   created_at: string
   updated_at: string
 }
+
+// Higher sort_order shows first (z-index style); ties fall back to name A-Z.
+const CATEGORY_ORDER_BY = 'ORDER BY sort_order DESC, name COLLATE NOCASE ASC'
 
 export class CategoryService {
   private static instance: CategoryService
@@ -33,6 +38,7 @@ export class CategoryService {
       id: dbCategory.id.toString(),
       name: dbCategory.name,
       image: dbCategory.image || undefined,
+      sortOrder: dbCategory.sort_order ?? 0,
       isActive: Boolean(dbCategory.is_active),
       createdAt: dbCategory.created_at,
       updatedAt: dbCategory.updated_at,
@@ -41,7 +47,7 @@ export class CategoryService {
 
   async getCategories(): Promise<Category[]> {
     try {
-      const categories = await query<DatabaseCategory>('SELECT * FROM categories ORDER BY name')
+      const categories = await query<DatabaseCategory>(`SELECT * FROM categories ${CATEGORY_ORDER_BY}`)
       return categories.map((category) => this.convertDbCategory(category))
     } catch (error) {
       console.error('Get categories error:', error)
@@ -51,7 +57,9 @@ export class CategoryService {
 
   async getActiveCategories(): Promise<Category[]> {
     try {
-      const categories = await query<DatabaseCategory>('SELECT * FROM categories WHERE is_active = 1 ORDER BY name')
+      const categories = await query<DatabaseCategory>(
+        `SELECT * FROM categories WHERE is_active = 1 ${CATEGORY_ORDER_BY}`,
+      )
       return categories.map((category) => this.convertDbCategory(category))
     } catch (error) {
       console.error('Get active categories error:', error)
@@ -76,10 +84,10 @@ export class CategoryService {
       const totalCount = countResult[0]?.count || 0
       const totalPages = Math.ceil(totalCount / limit)
 
-      const categories = await query<DatabaseCategory>('SELECT * FROM categories ORDER BY name LIMIT ? OFFSET ?', [
-        limit,
-        offset,
-      ])
+      const categories = await query<DatabaseCategory>(
+        `SELECT * FROM categories ${CATEGORY_ORDER_BY} LIMIT ? OFFSET ?`,
+        [limit, offset],
+      )
 
       return {
         categories: categories.map((category) => this.convertDbCategory(category)),
@@ -136,16 +144,18 @@ export class CategoryService {
       }
 
       const now = new Date().toISOString()
+      const sortOrder = Number.isFinite(categoryData.sortOrder) ? Math.trunc(categoryData.sortOrder) : 0
       const result = await execute(
-        `INSERT INTO categories (name, image, is_active, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        [name, categoryData.image || null, categoryData.isActive ? 1 : 0, now, now],
+        `INSERT INTO categories (name, image, sort_order, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [name, categoryData.image || null, sortOrder, categoryData.isActive ? 1 : 0, now, now],
       )
 
       const newCategory: Category = {
         id: result.lastInsertId.toString(),
         name,
         image: categoryData.image,
+        sortOrder,
         isActive: categoryData.isActive,
         createdAt: now,
         updatedAt: now,
@@ -188,6 +198,10 @@ export class CategoryService {
         fields.push('image = ?')
         values.push(updates.image || null)
       }
+      if (updates.sortOrder !== undefined) {
+        fields.push('sort_order = ?')
+        values.push(Number.isFinite(updates.sortOrder) ? Math.trunc(updates.sortOrder) : 0)
+      }
       if (updates.isActive !== undefined) {
         fields.push('is_active = ?')
         values.push(updates.isActive ? 1 : 0)
@@ -213,6 +227,10 @@ export class CategoryService {
         ...existing,
         name: nextName,
         image: updates.image !== undefined ? updates.image : existing.image,
+        sortOrder:
+          updates.sortOrder !== undefined && Number.isFinite(updates.sortOrder)
+            ? Math.trunc(updates.sortOrder)
+            : existing.sortOrder,
         isActive: updates.isActive !== undefined ? updates.isActive : existing.isActive,
         updatedAt: now,
       }

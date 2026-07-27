@@ -16,6 +16,7 @@ import {
 } from '../components/ui'
 import { useAuth } from '../hooks/useAuth'
 import { useTranslation } from '../hooks/useTranslation'
+import { getCategoryIcon } from '../lib/category-icons'
 import { fileToCompressedDataUrl } from '../lib/image-encode'
 import { type Category, categoryService } from '../services/categories-turso'
 
@@ -30,15 +31,20 @@ function EditCategoryModal({ category, isOpen, onClose, onSave }: EditCategoryMo
   const { t } = useTranslation()
   const panelClass = 'rounded-cards border border-fog-border bg-canvas p-6 '
 
-  const [formData, setFormData] = useState({ name: '', image: '', isActive: true })
+  const [formData, setFormData] = useState({ name: '', image: '', sortOrder: 0, isActive: true })
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
     if (category && isOpen) {
-      setFormData({ name: category.name, image: category.image || '', isActive: category.isActive })
+      setFormData({
+        name: category.name,
+        image: category.image || '',
+        sortOrder: category.sortOrder,
+        isActive: category.isActive,
+      })
     } else if (isOpen) {
-      setFormData({ name: '', image: '', isActive: true })
+      setFormData({ name: '', image: '', sortOrder: 0, isActive: true })
     }
     setError('')
   }, [category, isOpen])
@@ -74,11 +80,13 @@ function EditCategoryModal({ category, isOpen, onClose, onSave }: EditCategoryMo
         ? await categoryService.updateCategory(category.id, {
             name: formData.name,
             image: formData.image || undefined,
+            sortOrder: formData.sortOrder,
             isActive: formData.isActive,
           })
         : await categoryService.createCategory({
             name: formData.name,
             image: formData.image || undefined,
+            sortOrder: formData.sortOrder,
             isActive: formData.isActive,
           })
 
@@ -132,7 +140,7 @@ function EditCategoryModal({ category, isOpen, onClose, onSave }: EditCategoryMo
                   {formData.image ? (
                     <img src={formData.image} alt={formData.name} class="h-full w-full object-cover" />
                   ) : (
-                    <span class="text-2xl">🏷️</span>
+                    <span class="text-2xl">{getCategoryIcon(formData.name)}</span>
                   )}
                 </div>
                 <div>
@@ -164,6 +172,23 @@ function EditCategoryModal({ category, isOpen, onClose, onSave }: EditCategoryMo
                   </div>
                 </div>
               </div>
+            </div>
+
+            <div>
+              <Input
+                label={t('categoryManagement.order')}
+                type="number"
+                value={formData.sortOrder.toString()}
+                onInput={(e) =>
+                  setFormData({
+                    ...formData,
+                    sortOrder: parseInt((e.target as HTMLInputElement).value, 10) || 0,
+                  })
+                }
+                class="bg-canvas text-void"
+                placeholder="0"
+              />
+              <p class="mt-1 text-xs text-graphite ">{t('categoryManagement.orderHelp')}</p>
             </div>
 
             <div>
@@ -210,7 +235,7 @@ export default function Categories() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
-  const [pageSize] = useState(10)
+  const [pageSize] = useState(50)
 
   const { user: currentUser, hasRole, hasPermission } = useAuth()
 
@@ -325,6 +350,7 @@ export default function Categories() {
             <TableRow class="bg-chalk ">
               <TableHeader class="py-2 font-semibold">{t('categoryManagement.categoryImage')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('common.name')}</TableHeader>
+              <TableHeader class="py-2 font-semibold">{t('categoryManagement.order')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('common.status')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('common.actions')}</TableHeader>
             </TableRow>
@@ -337,11 +363,12 @@ export default function Categories() {
                     {category.image ? (
                       <img src={category.image} alt={category.name} class="h-full w-full object-cover" />
                     ) : (
-                      <span class="text-lg">🏷️</span>
+                      <span class="text-lg">{getCategoryIcon(category.name)}</span>
                     )}
                   </div>
                 </TableCell>
                 <TableCell class="font-medium text-void">{category.name}</TableCell>
+                <TableCell class="text-void">{category.sortOrder}</TableCell>
                 <TableCell>
                   <span class="inline-flex items-center rounded-chips border border-fog-border bg-chalk px-2 py-0.5 text-xs text-void">
                     {category.isActive ? t('categoryManagement.active') : t('categoryManagement.inactive')}

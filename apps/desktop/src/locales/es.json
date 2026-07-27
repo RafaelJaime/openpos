@@ -861,6 +861,8 @@
     "editCategory": "Editar Categoría",
     "categoryName": "Nombre de categoría",
     "categoryImage": "Imagen",
+    "order": "Orden",
+    "orderHelp": "Mayor aparece primero; empates se ordenan A-Z.",
     "uploadImage": "Subir imagen",
     "changeImage": "Cambiar imagen",
     "removeImage": "Quitar",

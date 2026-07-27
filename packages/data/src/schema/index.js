@@ -266,6 +266,7 @@ const categories = sqliteTable(
     id: integer('id').primaryKey({ autoIncrement: true }),
     name: text('name').notNull(),
     image: text('image'),
+    sortOrder: integer('sort_order').notNull().default(0),
     isActive: booleanColumn('is_active', true),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -273,6 +274,7 @@ const categories = sqliteTable(
   (table) => [
     uniqueIndex('idx_categories_name_unique').on(table.name),
     index('idx_categories_active').on(table.isActive),
+    index('idx_categories_sort_order').on(table.sortOrder),
     index('idx_categories_updated_at').on(table.updatedAt),
   ],
 )
