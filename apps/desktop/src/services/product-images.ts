@@ -150,6 +150,10 @@ export async function uploadProductImage(file: File): Promise<UploadedProductIma
   return uploadProductImageToApi(file)
 }
 
+export function isDataUrlImageKey(key: string): boolean {
+  return normalizeImageKey(key).startsWith('data:')
+}
+
 export async function resolveProductImageUrls(keys: string[]): Promise<Record<string, string>> {
   const normalizedKeys = Array.from(new Set(keys.map((key) => normalizeImageKey(key)).filter(Boolean)))
 
@@ -157,11 +161,22 @@ export async function resolveProductImageUrls(keys: string[]): Promise<Record<st
     return {}
   }
 
+  // Base64 data URLs are self-resolving: the stored value is already displayable.
+  const results: Record<string, string> = {}
+  for (const key of normalizedKeys) {
+    if (isDataUrlImageKey(key)) {
+      results[key] = key
+    }
+  }
+  const externalKeys = normalizedKeys.filter((key) => !isDataUrlImageKey(key))
+  if (externalKeys.length === 0) {
+    return results
+  }
+
   if (isDesktop) {
     const api = requireDesktopApi()
-    const localKeys = normalizedKeys.filter((key) => isLegacyLocalImageKey(key))
-    const remoteKeys = normalizedKeys.filter((key) => isRemoteImageKey(key))
-    const results: Record<string, string> = {}
+    const localKeys = externalKeys.filter((key) => isLegacyLocalImageKey(key))
+    const remoteKeys = externalKeys.filter((key) => isRemoteImageKey(key))
     const session = await getDesktopRemoteSessionState()
 
     if (remoteKeys.length > 0 && session.isReady) {
@@ -183,12 +198,18 @@ export async function resolveProductImageUrls(keys: string[]): Promise<Record<st
     return results
   }
 
-  return resolveRemoteProductImageUrls(normalizedKeys)
+  Object.assign(results, await resolveRemoteProductImageUrls(externalKeys))
+  return results
 }
 
 export async function deleteProductImage(key: string): Promise<void> {
   const trimmedKey = normalizeImageKey(key)
   if (!trimmedKey) {
+    return
+  }
+
+  // Base64 images live inline in the row; there is no external object to delete.
+  if (isDataUrlImageKey(trimmedKey)) {
     return
   }
 

@@ -18,6 +18,7 @@ import {
 import { useTranslation } from '../hooks/useTranslation'
 import { isDesktop } from '../lib/platform'
 import { authService } from '../services/auth-turso'
+import { type Category, categoryService } from '../services/categories-turso'
 import { type CompanySettings, companySettingsService } from '../services/company-settings-turso'
 import { type Customer, customerService } from '../services/customers-turso'
 import { type Order, orderService } from '../services/orders-turso'
@@ -140,6 +141,11 @@ export default function Orders() {
     notes: '',
   })
 
+  // POS mode (fast category -> product tap flow inside the create-order modal)
+  const [categories, setCategories] = useState<Category[]>([])
+  const [posMode, setPosMode] = useState(false)
+  const [posCategory, setPosCategory] = useState<string | null>(null)
+
   const [editOrderItems, setEditOrderItems] = useState<
     Array<{ productId: string; quantity: number; variantId?: string }>
   >([])
@@ -156,6 +162,13 @@ export default function Orders() {
     if (user) {
       setCurrentUserRole(user.role)
     }
+    void (async () => {
+      try {
+        setCategories(await categoryService.getActiveCategories())
+      } catch (err) {
+        console.error('Failed to load categories for POS mode:', err)
+      }
+    })()
   }, [])
 
   useEffect(() => {
@@ -480,6 +493,59 @@ export default function Orders() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const resetCreateModal = () => {
+    setIsCreateModalOpen(false)
+    setPosMode(false)
+    setPosCategory(null)
+    setNewOrder({
+      items: [],
+      customerId: '',
+      paymentMethod: 'cash',
+      notes: '',
+    })
+    setSelectedVariantForProduct({})
+  }
+
+  // POS "Terminar orden": create the order then mark it paid in one step.
+  const handleFinishOrder = async () => {
+    if (newOrder.items.length === 0) {
+      toast.error(t('orders.addItemError'))
+      return
+    }
+
+    try {
+      setIsLoading(true)
+      const result = await orderService.createOrder(newOrder)
+
+      if (result.success && result.order) {
+        const paidResult = await orderService.updateOrderStatus(result.order.id, 'paid', newOrder.paymentMethod)
+        const finalOrder = paidResult.success && paidResult.order ? paidResult.order : result.order
+
+        toast.success(t('orders.orderCompleted'))
+        const newOrdersList = [...allOrders, finalOrder]
+        setAllOrders(newOrdersList)
+        setOrders(newOrdersList)
+        resetCreateModal()
+
+        await loadData(selectedDateFilter)
+        const updatedProducts = await productService.getProducts()
+        setProducts(updatedProducts.filter((p) => p.isActive && p.stock > 0))
+      } else {
+        toast.error(result.error || t('errors.generic'))
+      }
+    } catch (_err) {
+      toast.error(t('errors.generic'))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // POS: tap a product to add it to the order, then return to the category list.
+  const handlePosAddProduct = (product: Product) => {
+    addItemToOrder(product.id)
+    setPosCategory(null)
   }
 
   const handleUpdateStatus = async (orderId: string, status: Order['status']) => {
@@ -1187,402 +1253,507 @@ export default function Orders() {
       )}
 
       {/*  Create Order Modal */}
-      <Dialog
-        isOpen={isCreateModalOpen}
-        onClose={() => {
-          setIsCreateModalOpen(false)
-        }}
-        title={t('orders.createNewOrder')}
-        size="full"
-      >
+      <Dialog isOpen={isCreateModalOpen} onClose={resetCreateModal} title={t('orders.createNewOrder')} size="full">
         <div>
           <div class="space-y-8">
-            {/* Available Products */}
-            <div>
-              <div class="mb-4">
-                <h3 class="text-lg font-semibold text-void ">{t('orders.availableProducts')}</h3>
-                <p class="mt-1 text-sm text-graphite ">{t('orders.clickToAdd')}</p>
+            {/* POS mode toggle / finish bar */}
+            <div class="flex flex-col gap-3 border-b border-fog-border pb-4 sm:flex-row sm:items-center sm:justify-between">
+              <div class="text-sm text-graphite ">
+                {newOrder.items.length} {t('orders.itemsSelected')}
               </div>
-              <div class="flex flex-col sm:flex-row gap-3 mb-2">
-                <div class="flex-1">
-                  <Input
-                    type="search"
-                    placeholder={t('orders.searchProducts')}
-                    value={productSearch}
-                    onInput={(e) => setProductSearch((e.target as HTMLInputElement).value)}
-                    leftIcon={
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke-width="1.5"
-                        stroke="currentColor"
-                        role="img"
-                        aria-label="Search"
-                      >
-                        <title>Search</title>
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
-                        />
-                      </svg>
-                    }
-                    rightIcon={
-                      productSearch ? (
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" role="img" aria-label="Clear search">
-                          <title>Clear search</title>
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M6 18L18 6M6 6l12 12"
-                          />
-                        </svg>
-                      ) : undefined
-                    }
-                    onRightIconClick={productSearch ? () => setProductSearch('') : undefined}
-                    class="text-sm"
-                  />
-                </div>
-              </div>
-              <div class="mb-3 text-sm text-graphite ">
-                {filteredProducts.length} {t('orders.of')} {products.length} {t('products.title').toLowerCase()}
-              </div>
-              <div class={`${panelClass} max-h-96 overflow-y-auto p-4 sm:p-6`}>
-                {filteredProducts.length === 0 ? (
-                  <div class="text-center py-12">
-                    <div class="text-6xl mb-4">🔍</div>
-                    <h3 class="mb-2 text-lg font-medium text-void ">{t('orders.noProductsFound')}</h3>
-                    <p class="text-graphite ">
-                      {productSearch
-                        ? t('orders.noProductsMatch', { search: productSearch })
-                        : t('orders.noProductsAvailable')}
-                    </p>
-                    {productSearch && (
-                      <button
-                        type="button"
-                        onClick={() => setProductSearch('')}
-                        class="mt-4 text-void hover:text-void font-medium"
-                      >
-                        {t('orders.clearSearch')}
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
-                    {filteredProducts.map((product) => {
-                      const productVariants = productsWithVariants[product.id]
-                      const isConfigurable = product.variantType === 'configurable'
-                      const selectedVariantId = selectedVariantForProduct[product.id]
-                      const selectedVariant = productVariants?.variants?.find((v) => v.id === selectedVariantId)
-
-                      return (
-                        <div
-                          key={product.id}
-                          class={`group relative rounded-cards border p-4 transition-colors duration-150 ${
-                            product.stock > 0
-                              ? 'cursor-pointer hover:border-fog-border'
-                              : 'cursor-not-allowed opacity-50'
-                          } ${selectedVariantId ? 'border-fog-border bg-chalk ' : 'border-fog-border bg-canvas '}`}
-                        >
-                          <div class="flex flex-col h-full">
-                            <div class="flex-1">
-                              <div class="flex items-start justify-between mb-3 gap-3">
-                                <div class="flex min-w-0 flex-1 items-start gap-3">
-                                  <ProductVisual
-                                    product={product}
-                                    name={product.name}
-                                    imageUrl={getProductImageUrl(product)}
-                                    sizeClass="h-12 w-12"
-                                  />
-                                  <div class="min-w-0 flex-1">
-                                    <div class="text-sm font-semibold leading-tight text-void ">{product.name}</div>
-                                    <div class="mt-1 inline-block rounded-full bg-chalk px-2 py-1 text-xs font-medium text-graphite ">
-                                      {product.category}
-                                    </div>
-                                  </div>
-                                </div>
-                                {isConfigurable && (
-                                  <span class="rounded-full bg-chalk px-2 py-1 text-xs text-void ">
-                                    {t('variants.variant')}
-                                  </span>
-                                )}
-                              </div>
-                              {product.barcode && (
-                                <div class="mb-2 text-[11px] font-mono text-graphite ">{product.barcode}</div>
-                              )}
-
-                              {/* Variant selector for configurable products */}
-                              {isConfigurable && productVariants?.variants && productVariants.variants.length > 0 && (
-                                <div class="mt-2 space-y-2">
-                                  <select
-                                    value={selectedVariantId || ''}
-                                    onChange={(e) => {
-                                      setSelectedVariantForProduct({
-                                        ...selectedVariantForProduct,
-                                        [product.id]: (e.target as HTMLSelectElement).value,
-                                      })
-                                    }}
-                                    class="w-full rounded-cards border border-fog-border bg-canvas px-2 py-2 text-xs text-void focus:border-fog-border focus:outline-none focus:ring-2 focus:ring-void "
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    <option value="">{t('variants.selectVariant')}</option>
-                                    {productVariants.variants
-                                      .filter((v) => v.isActive && v.stock > 0)
-                                      .map((variant) => {
-                                        const attrString = Object.entries(variant.attributes)
-                                          .map(([k, v]) => `${k}: ${v}`)
-                                          .join(', ')
-                                        return (
-                                          <option key={variant.id} value={variant.id}>
-                                            {attrString} - {formatCurrency(variant.price)} ({variant.stock} in stock)
-                                          </option>
-                                        )
-                                      })}
-                                  </select>
-                                </div>
-                              )}
-                            </div>
-
-                            <div class="flex items-center justify-between mt-auto">
-                              <div class="text-lg font-bold text-void ">
-                                {selectedVariant
-                                  ? formatCurrency(selectedVariant.price)
-                                  : formatCurrency(product.price)}
-                              </div>
-                              <div
-                                class={`rounded-full px-2 py-1 text-xs font-medium ${
-                                  (selectedVariant ? selectedVariant.stock : product.stock) > 10
-                                    ? 'bg-chalk text-void '
-                                    : (selectedVariant ? selectedVariant.stock : product.stock) > 0
-                                      ? 'bg-chalk text-void '
-                                      : 'bg-chalk text-void '
-                                }`}
-                              >
-                                {(selectedVariant ? selectedVariant.stock : product.stock) > 0
-                                  ? `📦 ${selectedVariant ? selectedVariant.stock : product.stock}`
-                                  : '❌ Out'}
-                              </div>
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() => addItemToOrder(product.id)}
-                              disabled={
-                                product.stock === 0 ||
-                                (isConfigurable && !selectedVariantId) ||
-                                (selectedVariant && selectedVariant.stock === 0)
-                              }
-                              class="w-full mt-3 bg-void disabled:bg-chalk disabled:cursor-not-allowed text-canvas disabled:text-ash text-sm font-medium py-2 px-4 rounded-buttons transition-colors duration-150"
-                            >
-                              {isConfigurable && !selectedVariantId
-                                ? t('variants.selectVariant')
-                                : t('orders.addProduct')}
-                            </button>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
+              {posMode ? (
+                <Button type="button" onClick={handleFinishOrder} disabled={isLoading || newOrder.items.length === 0}>
+                  {isLoading ? t('common.loading') : t('orders.finishOrder')}
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setPosMode(true)
+                    setPosCategory(null)
+                  }}
+                >
+                  {t('orders.posMode')}
+                </Button>
+              )}
             </div>
 
-            {/* Order Items */}
-            {newOrder.items.length > 0 && (
+            {posMode ? (
               <div>
-                <h3 class="mb-6 text-lg font-semibold text-void ">{t('orders.orderSummary')}</h3>
-                <div class={`${mutedPanelClass} space-y-3 p-4 sm:space-y-4 sm:p-6`}>
-                  {newOrder.items.map((item) => {
-                    const product = getProductById(item.productId)
-                    const variant = item.variantId
-                      ? productsWithVariants[item.productId]?.variants?.find((v) => v.id === item.variantId)
-                      : undefined
-                    const itemPrice = variant?.price || product?.price || 0
-                    const availableStock = variant?.stock || product?.stock || 0
-                    const variantAttributes = variant?.attributes
-
-                    return product ? (
-                      <div
-                        key={`${item.productId}-${item.variantId || 'simple'}`}
-                        class="flex flex-col sm:flex-row sm:items-center gap-3 rounded-cards border border-fog-border bg-canvas p-4 "
-                      >
-                        <div class="flex flex-1 items-start gap-3 min-w-0">
-                          <ProductVisual product={product} name={product.name} imageUrl={getProductImageUrl(product)} />
-                          <div class="flex-1 min-w-0">
-                            <div class="mb-1 font-semibold text-void truncate">{product.name}</div>
-                            {variantAttributes && (
-                              <div class="mb-2 text-xs text-void ">
-                                {Object.entries(variantAttributes).map(([k, v]) => (
-                                  <span
-                                    key={k}
-                                    class="mr-1 mb-1 inline-flex items-center rounded-cards bg-chalk px-2 py-1 text-void "
-                                  >
-                                    <span class="capitalize">{k}:</span> {v}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                            <div class="inline-block rounded-full bg-chalk px-3 py-1 text-sm text-graphite ">
-                              {formatCurrency(itemPrice)} × {item.quantity} ={' '}
-                              <span class="font-bold text-void">{formatCurrency(itemPrice * item.quantity)}</span>
+                {posCategory === null ? (
+                  <div>
+                    <h3 class="mb-4 text-lg font-semibold text-void ">{t('orders.selectCategory')}</h3>
+                    {categories.length === 0 ? (
+                      <p class="text-graphite ">{t('orders.noCategories')}</p>
+                    ) : (
+                      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                        {categories.map((category) => (
+                          <button
+                            key={category.id}
+                            type="button"
+                            onClick={() => setPosCategory(category.name)}
+                            class="flex flex-col items-center gap-3 rounded-cards border border-fog-border bg-canvas p-4 transition-colors hover:bg-chalk "
+                          >
+                            <div class="flex h-20 w-20 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk">
+                              {category.image ? (
+                                <img src={category.image} alt={category.name} class="h-full w-full object-cover" />
+                              ) : (
+                                <span class="text-3xl">{getCategoryIcon(category.name)}</span>
+                              )}
                             </div>
-                          </div>
-                        </div>
-                        <div class="flex items-center gap-2 flex-shrink-0">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              if (item.quantity > 1) {
-                                addItemToOrder(item.productId, -1, item.variantId)
-                              } else {
-                                removeItemFromOrder(item.productId, item.variantId)
-                              }
-                            }}
-                            class="w-8 h-8 p-0 flex items-center justify-center"
-                          >
-                            −
-                          </Button>
-                          <div class="w-10 rounded border border-fog-border bg-chalk px-1 py-1 text-center text-lg font-bold ">
-                            {item.quantity}
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => addItemToOrder(item.productId, 1, item.variantId)}
-                            disabled={item.quantity >= availableStock}
-                            class="w-8 h-8 p-0 flex items-center justify-center"
-                          >
-                            +
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            onClick={() => removeItemFromOrder(item.productId, item.variantId)}
-                            class="w-8 h-8 p-0 flex items-center justify-center ml-1"
-                          >
-                            ×
-                          </Button>
-                        </div>
+                            <span class="text-center text-sm font-medium text-void ">{category.name}</span>
+                          </button>
+                        ))}
                       </div>
-                    ) : null
-                  })}
-
-                  {/* Order Totals */}
-                  <div class="mt-4 border-t border-fog-border pt-4 sm:mt-6 sm:pt-6">
+                    )}
+                    <div class="mt-6 border-t border-fog-border pt-4 ">
+                      <Button type="button" variant="outline" onClick={() => setPosMode(false)}>
+                        {t('orders.exitPosMode')}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div class="mb-4 flex items-center gap-3">
+                      <Button type="button" variant="outline" size="sm" onClick={() => setPosCategory(null)}>
+                        ← {t('orders.backToCategories')}
+                      </Button>
+                      <h3 class="text-lg font-semibold text-void ">{posCategory}</h3>
+                    </div>
                     {(() => {
-                      const subtotal = newOrder.items.reduce((total, item) => {
-                        const product = products.find((p) => p.id === item.productId)
-                        const variant = item.variantId
-                          ? productsWithVariants[item.productId]?.variants?.find((v) => v.id === item.variantId)
-                          : undefined
-                        const itemPrice = variant?.price || product?.price || 0
-                        return total + itemPrice * item.quantity
-                      }, 0)
-                      const tax = taxEnabled ? subtotal * taxRate : 0
-                      const total = subtotal + tax
-
-                      return (
-                        <div class={`${panelClass} p-4 sm:p-5`}>
-                          <div class="space-y-3 sm:space-y-4">
-                            <div class="flex justify-between text-void ">
-                              <span class="font-medium">{t('common.subtotal')}:</span>
-                              <span class="font-semibold">{formatCurrency(subtotal)}</span>
-                            </div>
-                            {taxEnabled && (
-                              <div class="flex justify-between text-void ">
-                                <span class="font-medium">
-                                  {t('common.tax')} ({(taxRate * 100).toFixed(1)}%):
-                                </span>
-                                <span class="font-semibold">{formatCurrency(tax)}</span>
-                              </div>
-                            )}
-                            {!taxEnabled && (
-                              <div class="py-2 text-center text-sm italic text-graphite ">
-                                {t('orders.taxDisabled')}
-                              </div>
-                            )}
-                            <div class="border-t border-fog-border pt-3 sm:pt-4 ">
-                              <div class="flex justify-between rounded-cards bg-chalk px-3 py-2 text-lg font-bold text-void sm:px-4 sm:py-3 sm:text-xl ">
-                                <span>{t('common.total')}:</span>
-                                <span class="text-void ">{formatCurrency(total)}</span>
-                              </div>
-                            </div>
-                          </div>
+                      const categoryProducts = products.filter((product) => product.category === posCategory)
+                      return categoryProducts.length === 0 ? (
+                        <p class="text-graphite ">{t('orders.noProductsAvailable')}</p>
+                      ) : (
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                          {categoryProducts.map((product) => (
+                            <button
+                              key={product.id}
+                              type="button"
+                              onClick={() => handlePosAddProduct(product)}
+                              disabled={product.stock === 0}
+                              class="flex flex-col items-center gap-2 rounded-cards border border-fog-border bg-canvas p-4 transition-colors hover:bg-chalk disabled:cursor-not-allowed disabled:opacity-50 "
+                            >
+                              <ProductVisual
+                                product={product}
+                                name={product.name}
+                                imageUrl={getProductImageUrl(product)}
+                                sizeClass="h-16 w-16"
+                              />
+                              <span class="text-center text-sm font-medium text-void ">{product.name}</span>
+                              <span class="text-sm font-bold text-void ">{formatCurrency(product.price)}</span>
+                            </button>
+                          ))}
                         </div>
                       )
                     })()}
                   </div>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* Available Products */}
+                <div>
+                  <div class="mb-4">
+                    <h3 class="text-lg font-semibold text-void ">{t('orders.availableProducts')}</h3>
+                    <p class="mt-1 text-sm text-graphite ">{t('orders.clickToAdd')}</p>
+                  </div>
+                  <div class="flex flex-col sm:flex-row gap-3 mb-2">
+                    <div class="flex-1">
+                      <Input
+                        type="search"
+                        placeholder={t('orders.searchProducts')}
+                        value={productSearch}
+                        onInput={(e) => setProductSearch((e.target as HTMLInputElement).value)}
+                        leftIcon={
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke-width="1.5"
+                            stroke="currentColor"
+                            role="img"
+                            aria-label="Search"
+                          >
+                            <title>Search</title>
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+                            />
+                          </svg>
+                        }
+                        rightIcon={
+                          productSearch ? (
+                            <svg
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                              role="img"
+                              aria-label="Clear search"
+                            >
+                              <title>Clear search</title>
+                              <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M6 18L18 6M6 6l12 12"
+                              />
+                            </svg>
+                          ) : undefined
+                        }
+                        onRightIconClick={productSearch ? () => setProductSearch('') : undefined}
+                        class="text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div class="mb-3 text-sm text-graphite ">
+                    {filteredProducts.length} {t('orders.of')} {products.length} {t('products.title').toLowerCase()}
+                  </div>
+                  <div class={`${panelClass} max-h-96 overflow-y-auto p-4 sm:p-6`}>
+                    {filteredProducts.length === 0 ? (
+                      <div class="text-center py-12">
+                        <div class="text-6xl mb-4">🔍</div>
+                        <h3 class="mb-2 text-lg font-medium text-void ">{t('orders.noProductsFound')}</h3>
+                        <p class="text-graphite ">
+                          {productSearch
+                            ? t('orders.noProductsMatch', { search: productSearch })
+                            : t('orders.noProductsAvailable')}
+                        </p>
+                        {productSearch && (
+                          <button
+                            type="button"
+                            onClick={() => setProductSearch('')}
+                            class="mt-4 text-void hover:text-void font-medium"
+                          >
+                            {t('orders.clearSearch')}
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+                        {filteredProducts.map((product) => {
+                          const productVariants = productsWithVariants[product.id]
+                          const isConfigurable = product.variantType === 'configurable'
+                          const selectedVariantId = selectedVariantForProduct[product.id]
+                          const selectedVariant = productVariants?.variants?.find((v) => v.id === selectedVariantId)
+
+                          return (
+                            <div
+                              key={product.id}
+                              class={`group relative rounded-cards border p-4 transition-colors duration-150 ${
+                                product.stock > 0
+                                  ? 'cursor-pointer hover:border-fog-border'
+                                  : 'cursor-not-allowed opacity-50'
+                              } ${selectedVariantId ? 'border-fog-border bg-chalk ' : 'border-fog-border bg-canvas '}`}
+                            >
+                              <div class="flex flex-col h-full">
+                                <div class="flex-1">
+                                  <div class="flex items-start justify-between mb-3 gap-3">
+                                    <div class="flex min-w-0 flex-1 items-start gap-3">
+                                      <ProductVisual
+                                        product={product}
+                                        name={product.name}
+                                        imageUrl={getProductImageUrl(product)}
+                                        sizeClass="h-12 w-12"
+                                      />
+                                      <div class="min-w-0 flex-1">
+                                        <div class="text-sm font-semibold leading-tight text-void ">{product.name}</div>
+                                        <div class="mt-1 inline-block rounded-full bg-chalk px-2 py-1 text-xs font-medium text-graphite ">
+                                          {product.category}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {isConfigurable && (
+                                      <span class="rounded-full bg-chalk px-2 py-1 text-xs text-void ">
+                                        {t('variants.variant')}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {product.barcode && (
+                                    <div class="mb-2 text-[11px] font-mono text-graphite ">{product.barcode}</div>
+                                  )}
+
+                                  {/* Variant selector for configurable products */}
+                                  {isConfigurable &&
+                                    productVariants?.variants &&
+                                    productVariants.variants.length > 0 && (
+                                      <div class="mt-2 space-y-2">
+                                        <select
+                                          value={selectedVariantId || ''}
+                                          onChange={(e) => {
+                                            setSelectedVariantForProduct({
+                                              ...selectedVariantForProduct,
+                                              [product.id]: (e.target as HTMLSelectElement).value,
+                                            })
+                                          }}
+                                          class="w-full rounded-cards border border-fog-border bg-canvas px-2 py-2 text-xs text-void focus:border-fog-border focus:outline-none focus:ring-2 focus:ring-void "
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          <option value="">{t('variants.selectVariant')}</option>
+                                          {productVariants.variants
+                                            .filter((v) => v.isActive && v.stock > 0)
+                                            .map((variant) => {
+                                              const attrString = Object.entries(variant.attributes)
+                                                .map(([k, v]) => `${k}: ${v}`)
+                                                .join(', ')
+                                              return (
+                                                <option key={variant.id} value={variant.id}>
+                                                  {attrString} - {formatCurrency(variant.price)} ({variant.stock} in
+                                                  stock)
+                                                </option>
+                                              )
+                                            })}
+                                        </select>
+                                      </div>
+                                    )}
+                                </div>
+
+                                <div class="flex items-center justify-between mt-auto">
+                                  <div class="text-lg font-bold text-void ">
+                                    {selectedVariant
+                                      ? formatCurrency(selectedVariant.price)
+                                      : formatCurrency(product.price)}
+                                  </div>
+                                  <div
+                                    class={`rounded-full px-2 py-1 text-xs font-medium ${
+                                      (selectedVariant ? selectedVariant.stock : product.stock) > 10
+                                        ? 'bg-chalk text-void '
+                                        : (selectedVariant ? selectedVariant.stock : product.stock) > 0
+                                          ? 'bg-chalk text-void '
+                                          : 'bg-chalk text-void '
+                                    }`}
+                                  >
+                                    {(selectedVariant ? selectedVariant.stock : product.stock) > 0
+                                      ? `📦 ${selectedVariant ? selectedVariant.stock : product.stock}`
+                                      : '❌ Out'}
+                                  </div>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => addItemToOrder(product.id)}
+                                  disabled={
+                                    product.stock === 0 ||
+                                    (isConfigurable && !selectedVariantId) ||
+                                    (selectedVariant && selectedVariant.stock === 0)
+                                  }
+                                  class="w-full mt-3 bg-void disabled:bg-chalk disabled:cursor-not-allowed text-canvas disabled:text-ash text-sm font-medium py-2 px-4 rounded-buttons transition-colors duration-150"
+                                >
+                                  {isConfigurable && !selectedVariantId
+                                    ? t('variants.selectVariant')
+                                    : t('orders.addProduct')}
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+
+                {/* Order Items */}
+                {newOrder.items.length > 0 && (
+                  <div>
+                    <h3 class="mb-6 text-lg font-semibold text-void ">{t('orders.orderSummary')}</h3>
+                    <div class={`${mutedPanelClass} space-y-3 p-4 sm:space-y-4 sm:p-6`}>
+                      {newOrder.items.map((item) => {
+                        const product = getProductById(item.productId)
+                        const variant = item.variantId
+                          ? productsWithVariants[item.productId]?.variants?.find((v) => v.id === item.variantId)
+                          : undefined
+                        const itemPrice = variant?.price || product?.price || 0
+                        const availableStock = variant?.stock || product?.stock || 0
+                        const variantAttributes = variant?.attributes
+
+                        return product ? (
+                          <div
+                            key={`${item.productId}-${item.variantId || 'simple'}`}
+                            class="flex flex-col sm:flex-row sm:items-center gap-3 rounded-cards border border-fog-border bg-canvas p-4 "
+                          >
+                            <div class="flex flex-1 items-start gap-3 min-w-0">
+                              <ProductVisual
+                                product={product}
+                                name={product.name}
+                                imageUrl={getProductImageUrl(product)}
+                              />
+                              <div class="flex-1 min-w-0">
+                                <div class="mb-1 font-semibold text-void truncate">{product.name}</div>
+                                {variantAttributes && (
+                                  <div class="mb-2 text-xs text-void ">
+                                    {Object.entries(variantAttributes).map(([k, v]) => (
+                                      <span
+                                        key={k}
+                                        class="mr-1 mb-1 inline-flex items-center rounded-cards bg-chalk px-2 py-1 text-void "
+                                      >
+                                        <span class="capitalize">{k}:</span> {v}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                                <div class="inline-block rounded-full bg-chalk px-3 py-1 text-sm text-graphite ">
+                                  {formatCurrency(itemPrice)} × {item.quantity} ={' '}
+                                  <span class="font-bold text-void">{formatCurrency(itemPrice * item.quantity)}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div class="flex items-center gap-2 flex-shrink-0">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  if (item.quantity > 1) {
+                                    addItemToOrder(item.productId, -1, item.variantId)
+                                  } else {
+                                    removeItemFromOrder(item.productId, item.variantId)
+                                  }
+                                }}
+                                class="w-8 h-8 p-0 flex items-center justify-center"
+                              >
+                                −
+                              </Button>
+                              <div class="w-10 rounded border border-fog-border bg-chalk px-1 py-1 text-center text-lg font-bold ">
+                                {item.quantity}
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => addItemToOrder(item.productId, 1, item.variantId)}
+                                disabled={item.quantity >= availableStock}
+                                class="w-8 h-8 p-0 flex items-center justify-center"
+                              >
+                                +
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="danger"
+                                onClick={() => removeItemFromOrder(item.productId, item.variantId)}
+                                class="w-8 h-8 p-0 flex items-center justify-center ml-1"
+                              >
+                                ×
+                              </Button>
+                            </div>
+                          </div>
+                        ) : null
+                      })}
+
+                      {/* Order Totals */}
+                      <div class="mt-4 border-t border-fog-border pt-4 sm:mt-6 sm:pt-6">
+                        {(() => {
+                          const subtotal = newOrder.items.reduce((total, item) => {
+                            const product = products.find((p) => p.id === item.productId)
+                            const variant = item.variantId
+                              ? productsWithVariants[item.productId]?.variants?.find((v) => v.id === item.variantId)
+                              : undefined
+                            const itemPrice = variant?.price || product?.price || 0
+                            return total + itemPrice * item.quantity
+                          }, 0)
+                          const tax = taxEnabled ? subtotal * taxRate : 0
+                          const total = subtotal + tax
+
+                          return (
+                            <div class={`${panelClass} p-4 sm:p-5`}>
+                              <div class="space-y-3 sm:space-y-4">
+                                <div class="flex justify-between text-void ">
+                                  <span class="font-medium">{t('common.subtotal')}:</span>
+                                  <span class="font-semibold">{formatCurrency(subtotal)}</span>
+                                </div>
+                                {taxEnabled && (
+                                  <div class="flex justify-between text-void ">
+                                    <span class="font-medium">
+                                      {t('common.tax')} ({(taxRate * 100).toFixed(1)}%):
+                                    </span>
+                                    <span class="font-semibold">{formatCurrency(tax)}</span>
+                                  </div>
+                                )}
+                                {!taxEnabled && (
+                                  <div class="py-2 text-center text-sm italic text-graphite ">
+                                    {t('orders.taxDisabled')}
+                                  </div>
+                                )}
+                                <div class="border-t border-fog-border pt-3 sm:pt-4 ">
+                                  <div class="flex justify-between rounded-cards bg-chalk px-3 py-2 text-lg font-bold text-void sm:px-4 sm:py-3 sm:text-xl ">
+                                    <span>{t('common.total')}:</span>
+                                    <span class="text-void ">{formatCurrency(total)}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Customer Selection */}
+                <div>
+                  <Select
+                    label={t('orders.customer')}
+                    value={newOrder.customerId}
+                    onChange={(e) =>
+                      setNewOrder({
+                        ...newOrder,
+                        customerId: (e.target as HTMLSelectElement).value,
+                      })
+                    }
+                    options={[
+                      { value: '', label: t('orders.selectCustomerPlaceholder') },
+                      ...customers.map((customer) => ({
+                        value: customer.id,
+                        label: `${customer.firstName} ${customer.lastName}${customer.companyName ? ` (${customer.companyName})` : ''} - ${customer.customerNumber}`,
+                      })),
+                    ]}
+                  />
+                </div>
+
+                {/* Payment & Notes */}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <Select
+                      label={t('orders.paymentMethod')}
+                      value={newOrder.paymentMethod}
+                      onChange={(e) =>
+                        setNewOrder({
+                          ...newOrder,
+                          paymentMethod: (e.target as HTMLSelectElement).value as 'cash' | 'card' | 'transfer',
+                        })
+                      }
+                      options={[
+                        { value: 'cash', label: t('orders.cash') },
+                        { value: 'card', label: t('orders.card') },
+                        { value: 'transfer', label: t('orders.transfer') },
+                      ]}
+                    />
+                  </div>
+                  <div>
+                    <Input
+                      label={t('orders.orderNotes')}
+                      value={newOrder.notes}
+                      onInput={(e) =>
+                        setNewOrder({
+                          ...newOrder,
+                          notes: (e.target as HTMLInputElement).value,
+                        })
+                      }
+                      placeholder={t('orders.optionalNotes')}
+                    />
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 border-t border-fog-border pt-6 ">
+                  <Button type="button" variant="outline" onClick={resetCreateModal} disabled={isLoading}>
+                    {t('common.cancel')}
+                  </Button>
+                  <Button type="button" onClick={handleCreateOrder} disabled={isLoading || newOrder.items.length === 0}>
+                    {isLoading ? t('common.loading') : t('orders.createOrder')}
+                  </Button>
+                </div>
+              </>
             )}
-
-            {/* Customer Selection */}
-            <div>
-              <Select
-                label={t('orders.customer')}
-                value={newOrder.customerId}
-                onChange={(e) =>
-                  setNewOrder({
-                    ...newOrder,
-                    customerId: (e.target as HTMLSelectElement).value,
-                  })
-                }
-                options={[
-                  { value: '', label: t('orders.selectCustomerPlaceholder') },
-                  ...customers.map((customer) => ({
-                    value: customer.id,
-                    label: `${customer.firstName} ${customer.lastName}${customer.companyName ? ` (${customer.companyName})` : ''} - ${customer.customerNumber}`,
-                  })),
-                ]}
-              />
-            </div>
-
-            {/* Payment & Notes */}
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <Select
-                  label={t('orders.paymentMethod')}
-                  value={newOrder.paymentMethod}
-                  onChange={(e) =>
-                    setNewOrder({
-                      ...newOrder,
-                      paymentMethod: (e.target as HTMLSelectElement).value as 'cash' | 'card' | 'transfer',
-                    })
-                  }
-                  options={[
-                    { value: 'cash', label: t('orders.cash') },
-                    { value: 'card', label: t('orders.card') },
-                    { value: 'transfer', label: t('orders.transfer') },
-                  ]}
-                />
-              </div>
-              <div>
-                <Input
-                  label={t('orders.orderNotes')}
-                  value={newOrder.notes}
-                  onInput={(e) =>
-                    setNewOrder({
-                      ...newOrder,
-                      notes: (e.target as HTMLInputElement).value,
-                    })
-                  }
-                  placeholder={t('orders.optionalNotes')}
-                />
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 border-t border-fog-border pt-6 ">
-              <Button type="button" variant="outline" onClick={() => setIsCreateModalOpen(false)} disabled={isLoading}>
-                {t('common.cancel')}
-              </Button>
-              <Button type="button" onClick={handleCreateOrder} disabled={isLoading || newOrder.items.length === 0}>
-                {isLoading ? t('common.loading') : t('orders.createOrder')}
-              </Button>
-            </div>
           </div>
         </div>
       </Dialog>
