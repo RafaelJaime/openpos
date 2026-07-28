@@ -268,9 +268,13 @@ function EditCategoryModal({ category, isOpen, categories, onClose, onSave }: Ed
   )
 }
 
-// Flatten categories into a depth-first list with nesting depth, so the table
-// can render them as an indented subtree under their parents.
-function buildCategoryTree(categories: Category[]): { category: Category; depth: number }[] {
+// Flatten categories into the currently-visible depth-first list (collapsed
+// nodes hide their descendants), with nesting depth and whether the node has
+// children, so the table can render a collapsible tree.
+function buildCategoryTree(
+  categories: Category[],
+  collapsed: Set<string>,
+): { category: Category; depth: number; hasChildren: boolean }[] {
   const ids = new Set(categories.map((category) => category.id))
   const childrenByParent = new Map<string | null, Category[]>()
   for (const category of categories) {
@@ -279,11 +283,14 @@ function buildCategoryTree(categories: Category[]): { category: Category; depth:
     siblings.push(category)
     childrenByParent.set(key, siblings)
   }
-  const result: { category: Category; depth: number }[] = []
+  const result: { category: Category; depth: number; hasChildren: boolean }[] = []
   const walk = (parent: string | null, depth: number) => {
     for (const category of childrenByParent.get(parent) ?? []) {
-      result.push({ category, depth })
-      walk(category.id, depth + 1)
+      const hasChildren = (childrenByParent.get(category.id)?.length ?? 0) > 0
+      result.push({ category, depth, hasChildren })
+      if (hasChildren && !collapsed.has(category.id)) {
+        walk(category.id, depth + 1)
+      }
     }
   }
   walk(null, 0)
@@ -301,6 +308,19 @@ export default function Categories() {
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+
+  const toggleCollapse = (id: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
 
   const [currentPage, setCurrentPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
@@ -419,7 +439,6 @@ export default function Categories() {
         <Table dense striped>
           <TableHead>
             <TableRow class="bg-chalk ">
-              <TableHeader class="py-2 font-semibold">{t('categoryManagement.categoryImage')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('common.name')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('categoryManagement.order')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('common.status')}</TableHeader>
@@ -427,28 +446,43 @@ export default function Categories() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {buildCategoryTree(allCategories).map(({ category, depth }) => (
+            {buildCategoryTree(allCategories, collapsed).map(({ category, depth, hasChildren }) => (
               <TableRow key={category.id}>
-                <TableCell>
-                  <div class="flex items-stretch">
-                    {depth > 0 && (
-                      <div class="flex items-stretch" aria-hidden="true">
-                        {Array.from({ length: depth - 1 }).map((_, level) => (
-                          <span key={`spine-${category.id}-${level}`} class="w-6 border-fog-border border-l" />
-                        ))}
-                        <span class="mr-2 h-1/2 w-6 rounded-bl-xl border-fog-border border-b border-l" />
-                      </div>
+                <TableCell class="font-medium text-void">
+                  <div class="flex items-center gap-2" style={{ paddingLeft: `${depth * 24}px` }}>
+                    {hasChildren ? (
+                      <button
+                        type="button"
+                        onClick={() => toggleCollapse(category.id)}
+                        aria-label={collapsed.has(category.id) ? t('common.expand') : t('common.collapse')}
+                        class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-graphite transition-colors hover:bg-chalk hover:text-void"
+                      >
+                        <svg
+                          class={`h-4 w-4 transition-transform ${collapsed.has(category.id) ? '' : 'rotate-90'}`}
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="M9 6l6 6-6 6" />
+                        </svg>
+                      </button>
+                    ) : (
+                      <span class="h-5 w-5 shrink-0" aria-hidden="true" />
                     )}
-                    <div class="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk">
+                    <div class="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk">
                       {category.image ? (
                         <img src={category.image} alt={category.name} class="h-full w-full object-cover" />
                       ) : (
-                        <span class="text-lg">{getCategoryIcon(category.name)}</span>
+                        <span class="text-base">{getCategoryIcon(category.name)}</span>
                       )}
                     </div>
+                    <span>{category.name}</span>
                   </div>
                 </TableCell>
-                <TableCell class="font-medium text-void">{category.name}</TableCell>
                 <TableCell class="text-void">{category.sortOrder}</TableCell>
                 <TableCell>
                   <span class="inline-flex items-center rounded-chips border border-fog-border bg-chalk px-2 py-0.5 text-xs text-void">

@@ -25,6 +25,8 @@
     "filter": "Filtrar",
     "sort": "Ordenar",
     "actions": "Acciones",
+    "expand": "Expandir",
+    "collapse": "Contraer",
     "details": "Detalles",
     "total": "Total",
     "subtotal": "Subtotal",
