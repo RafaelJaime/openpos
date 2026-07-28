@@ -430,20 +430,25 @@ export default function Categories() {
             {buildCategoryTree(allCategories).map(({ category, depth }) => (
               <TableRow key={category.id}>
                 <TableCell>
-                  <div class="flex h-10 w-10 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk">
-                    {category.image ? (
-                      <img src={category.image} alt={category.name} class="h-full w-full object-cover" />
-                    ) : (
-                      <span class="text-lg">{getCategoryIcon(category.name)}</span>
+                  <div class="flex items-stretch">
+                    {depth > 0 && (
+                      <div class="flex items-stretch" aria-hidden="true">
+                        {Array.from({ length: depth - 1 }).map((_, level) => (
+                          <span key={`spine-${category.id}-${level}`} class="w-6 border-fog-border border-l" />
+                        ))}
+                        <span class="mr-2 h-1/2 w-6 rounded-bl-xl border-fog-border border-b border-l" />
+                      </div>
                     )}
+                    <div class="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk">
+                      {category.image ? (
+                        <img src={category.image} alt={category.name} class="h-full w-full object-cover" />
+                      ) : (
+                        <span class="text-lg">{getCategoryIcon(category.name)}</span>
+                      )}
+                    </div>
                   </div>
                 </TableCell>
-                <TableCell class="font-medium text-void">
-                  <span class="flex items-center" style={{ paddingLeft: `${depth * 20}px` }}>
-                    {depth > 0 && <span class="mr-1 text-graphite">└</span>}
-                    {category.name}
-                  </span>
-                </TableCell>
+                <TableCell class="font-medium text-void">{category.name}</TableCell>
                 <TableCell class="text-void">{category.sortOrder}</TableCell>
                 <TableCell>
                   <span class="inline-flex items-center rounded-chips border border-fog-border bg-chalk px-2 py-0.5 text-xs text-void">
