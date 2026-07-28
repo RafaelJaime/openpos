@@ -268,6 +268,28 @@ function EditCategoryModal({ category, isOpen, categories, onClose, onSave }: Ed
   )
 }
 
+// Flatten categories into a depth-first list with nesting depth, so the table
+// can render them as an indented subtree under their parents.
+function buildCategoryTree(categories: Category[]): { category: Category; depth: number }[] {
+  const ids = new Set(categories.map((category) => category.id))
+  const childrenByParent = new Map<string | null, Category[]>()
+  for (const category of categories) {
+    const key = category.parentId && ids.has(category.parentId) ? category.parentId : null
+    const siblings = childrenByParent.get(key) ?? []
+    siblings.push(category)
+    childrenByParent.set(key, siblings)
+  }
+  const result: { category: Category; depth: number }[] = []
+  const walk = (parent: string | null, depth: number) => {
+    for (const category of childrenByParent.get(parent) ?? []) {
+      result.push({ category, depth })
+      walk(category.id, depth + 1)
+    }
+  }
+  walk(null, 0)
+  return result
+}
+
 export default function Categories() {
   const { t } = useTranslation()
   const panelClass = 'rounded-cards border border-fog-border bg-canvas '
@@ -399,28 +421,34 @@ export default function Categories() {
             <TableRow class="bg-chalk ">
               <TableHeader class="py-2 font-semibold">{t('categoryManagement.categoryImage')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('common.name')}</TableHeader>
-              <TableHeader class="py-2 font-semibold">{t('categoryManagement.parent')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('categoryManagement.order')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('common.status')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('common.actions')}</TableHeader>
             </TableRow>
           </TableHead>
           <TableBody>
-            {categories.map((category) => (
+            {buildCategoryTree(allCategories).map(({ category, depth }) => (
               <TableRow key={category.id}>
                 <TableCell>
-                  <div class="flex h-10 w-10 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk">
-                    {category.image ? (
-                      <img src={category.image} alt={category.name} class="h-full w-full object-cover" />
-                    ) : (
-                      <span class="text-lg">{getCategoryIcon(category.name)}</span>
+                  <div class="flex items-stretch">
+                    {depth > 0 && (
+                      <div class="flex items-stretch" aria-hidden="true">
+                        {Array.from({ length: depth - 1 }).map((_, level) => (
+                          <span key={`spine-${category.id}-${level}`} class="w-6 border-fog-border border-l" />
+                        ))}
+                        <span class="mr-2 h-1/2 w-6 rounded-bl-xl border-fog-border border-b border-l" />
+                      </div>
                     )}
+                    <div class="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk">
+                      {category.image ? (
+                        <img src={category.image} alt={category.name} class="h-full w-full object-cover" />
+                      ) : (
+                        <span class="text-lg">{getCategoryIcon(category.name)}</span>
+                      )}
+                    </div>
                   </div>
                 </TableCell>
                 <TableCell class="font-medium text-void">{category.name}</TableCell>
-                <TableCell class="text-graphite">
-                  {allCategories.find((option) => option.id === category.parentId)?.name ?? '—'}
-                </TableCell>
                 <TableCell class="text-void">{category.sortOrder}</TableCell>
                 <TableCell>
                   <span class="inline-flex items-center rounded-chips border border-fog-border bg-chalk px-2 py-0.5 text-xs text-void">
