@@ -1039,9 +1039,6 @@ export default function Orders() {
       <div class="fixed inset-0 z-50 flex flex-col bg-canvas">
         <div class="flex flex-col gap-3 border-b border-fog-border p-4">
           <div class="flex flex-wrap items-center gap-2">
-            <Button type="button" variant="outline" onClick={handleExitPosMode} disabled={isLoading}>
-              {t('orders.exitPosMode')}
-            </Button>
             <Button type="button" onClick={handleFinishOrder} disabled={isLoading || newOrder.items.length === 0}>
               {isLoading ? t('common.loading') : t('orders.finishOrder')}
             </Button>
@@ -1061,29 +1058,36 @@ export default function Orders() {
 
         <div class="flex-1 overflow-y-auto p-4">
           {posCategory === null ? (
-            categories.length === 0 ? (
-              <p class="text-graphite ">{t('orders.noCategories')}</p>
-            ) : (
-              <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                {categories.map((category) => (
-                  <button
-                    key={category.id}
-                    type="button"
-                    onClick={() => setPosCategory(category.name)}
-                    class="flex flex-col items-center gap-3 rounded-cards border border-fog-border bg-canvas p-4 transition-colors hover:bg-chalk "
-                  >
-                    <div class="flex h-24 w-24 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk">
-                      {category.image ? (
-                        <img src={category.image} alt={category.name} class="h-full w-full object-cover" />
-                      ) : (
-                        <span class="text-4xl">{getCategoryIcon(category.name)}</span>
-                      )}
-                    </div>
-                    <span class="text-center text-sm font-medium text-void ">{category.name}</span>
-                  </button>
-                ))}
+            <div>
+              {categories.length === 0 ? (
+                <p class="text-graphite ">{t('orders.noCategories')}</p>
+              ) : (
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                  {categories.map((category) => (
+                    <button
+                      key={category.id}
+                      type="button"
+                      onClick={() => setPosCategory(category.name)}
+                      class="flex flex-col items-center gap-3 rounded-cards border border-fog-border bg-canvas p-4 transition-colors hover:bg-chalk "
+                    >
+                      <div class="flex h-24 w-24 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk">
+                        {category.image ? (
+                          <img src={category.image} alt={category.name} class="h-full w-full object-cover" />
+                        ) : (
+                          <span class="text-4xl">{getCategoryIcon(category.name)}</span>
+                        )}
+                      </div>
+                      <span class="text-center text-sm font-medium text-void ">{category.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div class="mt-6 border-t border-fog-border pt-4 ">
+                <Button type="button" variant="outline" onClick={handleExitPosMode} disabled={isLoading}>
+                  {t('orders.exitPosMode')}
+                </Button>
               </div>
-            )
+            </div>
           ) : (
             <div>
               <div class="mb-4 flex items-center gap-3">
