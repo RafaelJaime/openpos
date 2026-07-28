@@ -150,6 +150,7 @@ export default function Orders() {
   const [categories, setCategories] = useState<Category[]>([])
   const [posMode, setPosMode] = useState(false)
   const [posCategory, setPosCategory] = useState<string | null>(null)
+  const [posCartOpen, setPosCartOpen] = useState(false)
 
   const [editOrderItems, setEditOrderItems] = useState<
     Array<{ productId: string; quantity: number; variantId?: string }>
@@ -1056,7 +1057,10 @@ export default function Orders() {
             </Button>
           </div>
           <div class="text-sm text-graphite ">
-            {newOrder.items.length} {t('orders.itemsSelected')}
+            {t('orders.cartCount', {
+              products: newOrder.items.length,
+              items: newOrder.items.reduce((sum, item) => sum + item.quantity, 0),
+            })}
           </div>
         </div>
 
@@ -1090,9 +1094,12 @@ export default function Orders() {
                   ))}
                 </div>
               )}
-              <div class="mt-6 border-t border-fog-border pt-4 ">
+              <div class="mt-6 flex flex-wrap gap-2 border-t border-fog-border pt-4 ">
                 <Button type="button" variant="outline" onClick={handleExitPosMode} disabled={isLoading}>
                   {t('orders.exitPosMode')}
+                </Button>
+                <Button type="button" variant="outline" onClick={() => setPosCartOpen(true)}>
+                  {t('orders.viewCart')}
                 </Button>
               </div>
             </div>
@@ -1134,6 +1141,95 @@ export default function Orders() {
             </div>
           )}
         </div>
+
+        <Dialog isOpen={posCartOpen} onClose={() => setPosCartOpen(false)} title={t('orders.currentCart')} size="lg">
+          {newOrder.items.length === 0 ? (
+            <p class="py-8 text-center text-graphite ">{t('orders.cartEmpty')}</p>
+          ) : (
+            <div class="space-y-3">
+              {newOrder.items.map((item) => {
+                const product = getProductById(item.productId)
+                const variant = item.variantId
+                  ? productsWithVariants[item.productId]?.variants?.find((v) => v.id === item.variantId)
+                  : undefined
+                const itemPrice = variant?.price || product?.price || 0
+                const availableStock = variant?.stock || product?.stock || 0
+                const variantAttributes = variant?.attributes
+
+                return product ? (
+                  <div
+                    key={`${item.productId}-${item.variantId || 'simple'}`}
+                    class="flex flex-col sm:flex-row sm:items-center gap-3 rounded-cards border border-fog-border bg-canvas p-4 "
+                  >
+                    <div class="flex flex-1 items-start gap-3 min-w-0">
+                      <ProductVisual product={product} name={product.name} imageUrl={getProductImageUrl(product)} />
+                      <div class="flex-1 min-w-0">
+                        <div class="mb-1 font-semibold text-void truncate">{product.name}</div>
+                        {variantAttributes && (
+                          <div class="mb-2 text-xs text-void ">
+                            {Object.entries(variantAttributes).map(([k, v]) => (
+                              <span
+                                key={k}
+                                class="mr-1 mb-1 inline-flex items-center rounded-cards bg-chalk px-2 py-1 text-void "
+                              >
+                                <span class="capitalize">{k}:</span> {v}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div class="inline-block rounded-full bg-chalk px-3 py-1 text-sm text-graphite ">
+                          {formatCurrency(itemPrice)} × {item.quantity} ={' '}
+                          <span class="font-bold text-void">{formatCurrency(itemPrice * item.quantity)}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          if (item.quantity > 1) {
+                            addItemToOrder(item.productId, -1, item.variantId)
+                          } else {
+                            removeItemFromOrder(item.productId, item.variantId)
+                          }
+                        }}
+                        class="w-8 h-8 p-0 flex items-center justify-center"
+                      >
+                        −
+                      </Button>
+                      <div class="w-10 rounded border border-fog-border bg-chalk px-1 py-1 text-center text-lg font-bold ">
+                        {item.quantity}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => addItemToOrder(item.productId, 1, item.variantId)}
+                        disabled={item.quantity >= availableStock}
+                        class="w-8 h-8 p-0 flex items-center justify-center"
+                      >
+                        +
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => removeItemFromOrder(item.productId, item.variantId)}
+                        class="w-8 h-8 p-0 flex items-center justify-center ml-1"
+                      >
+                        ×
+                      </Button>
+                    </div>
+                  </div>
+                ) : null
+              })}
+            </div>
+          )}
+          <div class="mt-6 flex justify-end border-t border-fog-border pt-4">
+            <Button type="button" onClick={() => setPosCartOpen(false)}>
+              {t('common.close')}
+            </Button>
+          </div>
+        </Dialog>
       </div>
     )
   }
