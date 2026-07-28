@@ -155,6 +155,8 @@ const companySettings = sqliteTable(
     email: text('email'),
     website: text('website'),
     receiptFooter: text('receipt_footer'),
+    bbvaTpvEnabled: booleanColumn('bbva_tpv_enabled', false),
+    paymentConceptTemplate: text('payment_concept_template'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

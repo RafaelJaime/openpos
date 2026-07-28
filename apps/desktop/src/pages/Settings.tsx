@@ -283,6 +283,37 @@ export default function Settings() {
               </div>
             </div>
 
+            {/* Payments / BBVA TPV */}
+            <div class={`${panelClass} p-6`}>
+              <h2 class={sectionTitleClass}>{t('settings.paymentsTitle')}</h2>
+              <div class="space-y-4">
+                <label class="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={localSettings.bbvaTpvEnabled}
+                    onChange={(e) => handleChange('bbvaTpvEnabled', (e.target as HTMLInputElement).checked)}
+                    disabled={isSaving}
+                  />
+                  <span class="text-sm text-void">{t('settings.bbvaTpvEnabled')}</span>
+                </label>
+                {localSettings.bbvaTpvEnabled && (
+                  <div>
+                    <Input
+                      label={t('settings.paymentConceptTemplate')}
+                      value={localSettings.paymentConceptTemplate || ''}
+                      onInput={(e) =>
+                        handleChange('paymentConceptTemplate', (e.target as HTMLInputElement).value || undefined)
+                      }
+                      disabled={isSaving}
+                      class="mb-2"
+                      placeholder="{store} · {order} · {items} · {thanks}"
+                    />
+                    <span class={helperTextClass}>{t('settings.paymentConceptTemplateDesc')}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* System Preferences */}
             <div class={`${panelClass} p-6`}>
               <h2 class={sectionTitleClass}>{t('settings.systemSettings')}</h2>

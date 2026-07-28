@@ -22,6 +22,7 @@ import { type Category, categoryService } from '../services/categories-turso'
 import { type CompanySettings, companySettingsService } from '../services/company-settings-turso'
 import { type Customer, customerService } from '../services/customers-turso'
 import { type Order, orderService } from '../services/orders-turso'
+import { amountToCents, buildPaymentConcept, chargeWithTerminal, orderNumberFromId } from '../services/payment-terminal'
 import { formatReceiptData, type PrintReceiptData, printThermalReceipt } from '../services/print-service'
 import { resolveProductImageUrls } from '../services/product-images'
 import { type Product, type ProductWithVariants, productService } from '../services/products-turso'
@@ -525,7 +526,31 @@ export default function Orders() {
       const result = await orderService.createOrder(newOrder)
 
       if (result.success && result.order) {
-        const paidResult = await orderService.updateOrderStatus(result.order.id, 'paid', newOrder.paymentMethod)
+        // BBVA TPV: charge the dataphone before marking the sale paid.
+        if (companySettings?.bbvaTpvEnabled) {
+          const itemsSummary = result.order.items.map((item) => `${item.quantity}x ${item.productName}`).join(', ')
+          const orderNumber = orderNumberFromId(result.order.id)
+          const payment = await chargeWithTerminal({
+            amountCents: amountToCents(result.order.total),
+            orderNumber,
+            description: buildPaymentConcept({
+              storeName: companySettings.name,
+              orderNumber,
+              itemsSummary,
+              thankYou: companySettings.receiptFooter || t('orders.receiptFooter'),
+              template: companySettings.paymentConceptTemplate,
+            }),
+          })
+          if (payment.status !== 'approved') {
+            // Roll back the pending order so the cart stays intact for a retry.
+            await orderService.deleteOrder(result.order.id)
+            toast.error(t('orders.paymentNotApproved'))
+            return
+          }
+        }
+
+        const paymentMethod = companySettings?.bbvaTpvEnabled ? 'card' : newOrder.paymentMethod
+        const paidResult = await orderService.updateOrderStatus(result.order.id, 'paid', paymentMethod)
         const finalOrder = paidResult.success && paidResult.order ? paidResult.order : result.order
 
         toast.success(t('orders.orderCompleted'))
