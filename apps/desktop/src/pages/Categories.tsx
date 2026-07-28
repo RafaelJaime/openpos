@@ -52,6 +52,62 @@ function collectDescendantIds(id: string, categories: Category[]): Set<string> {
   return descendants
 }
 
+// A category image is either an uploaded base64 data URL or a chosen emoji.
+function isDataUrlImage(value?: string | null): boolean {
+  return typeof value === 'string' && value.startsWith('data:')
+}
+
+const CATEGORY_EMOJIS = [
+  '🥤',
+  '☕',
+  '🍺',
+  '🍷',
+  '🧃',
+  '🥛',
+  '🍞',
+  '🥐',
+  '🧁',
+  '🍰',
+  '🍫',
+  '🍬',
+  '🍿',
+  '🍎',
+  '🍌',
+  '🥦',
+  '🥕',
+  '🧀',
+  '🥩',
+  '🍗',
+  '🐟',
+  '🦐',
+  '🍕',
+  '🍔',
+  '🌮',
+  '🍜',
+  '🍣',
+  '🍦',
+  '🧊',
+  '🥫',
+  '🫙',
+  '🍳',
+  '🧽',
+  '🧴',
+  '🧻',
+  '📱',
+  '💻',
+  '🎮',
+  '🧸',
+  '👕',
+  '👟',
+  '💊',
+  '🛒',
+  '🏠',
+  '🌸',
+  '⚽',
+  '🏷️',
+  '📦',
+]
+
 function EditCategoryModal({ category, isOpen, categories, onClose, onSave }: EditCategoryModalProps) {
   const { t } = useTranslation()
   const panelClass = 'rounded-cards border border-fog-border bg-canvas p-6 '
@@ -174,7 +230,11 @@ function EditCategoryModal({ category, isOpen, categories, onClose, onSave }: Ed
               <div class="flex items-center gap-4">
                 <div class="flex h-20 w-20 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk">
                   {formData.image ? (
-                    <img src={formData.image} alt={formData.name} class="h-full w-full object-cover" />
+                    isDataUrlImage(formData.image) ? (
+                      <img src={formData.image} alt={formData.name} class="h-full w-full object-cover" />
+                    ) : (
+                      <span class="text-4xl">{formData.image}</span>
+                    )
                   ) : (
                     <span class="text-2xl">{getCategoryIcon(formData.name)}</span>
                   )}
@@ -205,6 +265,23 @@ function EditCategoryModal({ category, isOpen, categories, onClose, onSave }: Ed
                         {t('categoryManagement.removeImage')}
                       </Button>
                     )}
+                  </div>
+                  <div class="mt-3">
+                    <p class="mb-1 text-xs text-graphite ">{t('categoryManagement.orChooseEmoji')}</p>
+                    <div class="flex max-h-28 flex-wrap gap-1 overflow-y-auto">
+                      {CATEGORY_EMOJIS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => setFormData((prev) => ({ ...prev, image: emoji }))}
+                          class={`flex h-9 w-9 items-center justify-center rounded-cards border text-lg transition-colors hover:bg-chalk ${
+                            formData.image === emoji ? 'border-void bg-chalk' : 'border-fog-border'
+                          }`}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -475,7 +552,11 @@ export default function Categories() {
                     )}
                     <div class="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk">
                       {category.image ? (
-                        <img src={category.image} alt={category.name} class="h-full w-full object-cover" />
+                        isDataUrlImage(category.image) ? (
+                          <img src={category.image} alt={category.name} class="h-full w-full object-cover" />
+                        ) : (
+                          <span class="text-lg">{category.image}</span>
+                        )
                       ) : (
                         <span class="text-base">{getCategoryIcon(category.name)}</span>
                       )}

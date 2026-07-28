@@ -1076,7 +1076,11 @@ export default function Orders() {
                     >
                       <div class="flex h-24 w-24 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk">
                         {category.image ? (
-                          <img src={category.image} alt={category.name} class="h-full w-full object-cover" />
+                          category.image.startsWith('data:') ? (
+                            <img src={category.image} alt={category.name} class="h-full w-full object-cover" />
+                          ) : (
+                            <span class="text-5xl">{category.image}</span>
+                          )
                         ) : (
                           <span class="text-4xl">{getCategoryIcon(category.name)}</span>
                         )}
