@@ -14,9 +14,10 @@ afterEach(() => {
 })
 
 describe('payment terminal', () => {
-  it('approves via the simulated stub when no native plugin is present', async () => {
+  it('reports unavailable when no native terminal plugin is present', async () => {
     const result = await chargeWithTerminal({ amountCents: 3050, orderNumber: 'OP000001', description: 'x' })
-    expect(result.status).toBe('approved')
+    expect(result.status).toBe('unavailable')
+    // The simulated helper still approves, for tests/dev use.
     expect(simulateTerminalPayment({ amountCents: 1, orderNumber: 'OP1', description: 'x' }).status).toBe('approved')
   })
 

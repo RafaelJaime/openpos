@@ -16,7 +16,7 @@ export interface TerminalPaymentRequest {
 }
 
 export interface TerminalPaymentResult {
-  status: 'approved' | 'declined' | 'cancelled' | 'error'
+  status: 'approved' | 'declined' | 'cancelled' | 'error' | 'unavailable'
   authCode?: string
   reference?: string
   rawMessage?: string
@@ -45,14 +45,16 @@ export function simulateTerminalPayment(request: TerminalPaymentRequest): Termin
 
 export async function chargeWithTerminal(request: TerminalPaymentRequest): Promise<TerminalPaymentResult> {
   const native = getNativeTerminal()
-  if (native) {
-    try {
-      return await native.charge(request)
-    } catch (error) {
-      return { status: 'error', rawMessage: error instanceof Error ? error.message : String(error) }
-    }
+  if (!native) {
+    // No native terminal plugin (web/desktop, or Android without the SDK):
+    // report unavailable instead of pretending the charge succeeded.
+    return { status: 'unavailable', rawMessage: 'No payment terminal found' }
   }
-  return simulateTerminalPayment(request)
+  try {
+    return await native.charge(request)
+  } catch (error) {
+    return { status: 'error', rawMessage: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 /** Redsys requires amounts in cents (e.g. 3050 = €30.50). */

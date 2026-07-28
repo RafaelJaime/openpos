@@ -333,6 +333,7 @@
     "paymentNotApproved": "Payment was not approved. The order was not charged.",
     "paymentApproved": "Payment approved",
     "openDataphone": "Open dataphone",
+    "dataphoneNotFound": "No dataphone found",
     "posMode": "POS mode",
     "exitPosMode": "Exit POS mode",
     "finishOrder": "Finish order",

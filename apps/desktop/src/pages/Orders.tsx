@@ -550,7 +550,9 @@ export default function Orders() {
           if (payment.status !== 'approved') {
             // Roll back the pending order so the cart stays intact for a retry.
             await orderService.deleteOrder(result.order.id)
-            toast.error(t('orders.paymentNotApproved'))
+            toast.error(
+              payment.status === 'unavailable' ? t('orders.dataphoneNotFound') : t('orders.paymentNotApproved'),
+            )
             return
           }
         }
@@ -659,6 +661,8 @@ export default function Orders() {
       })
       if (payment.status === 'approved') {
         toast.success(t('orders.paymentApproved'))
+      } else if (payment.status === 'unavailable') {
+        toast.error(t('orders.dataphoneNotFound'))
       } else {
         toast.error(t('orders.paymentNotApproved'))
       }
