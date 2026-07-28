@@ -173,6 +173,7 @@ const orders = sqliteTable(
     subtotal: real('subtotal').notNull(),
     tax: real('tax').notNull(),
     total: real('total').notNull(),
+    discount: real('discount').notNull().default(0),
     status: text('status').notNull(),
     paymentMethod: text('payment_method'),
     notes: text('notes'),
@@ -281,6 +282,34 @@ const categories = sqliteTable(
   ],
 )
 
+const promotions = sqliteTable(
+  'promotions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    name: text('name').notNull(),
+    type: text('type').notNull(),
+    percent: real('percent'),
+    buyN: integer('buy_n'),
+    payM: integer('pay_m'),
+    scopeType: text('scope_type').notNull(),
+    scopeValue: text('scope_value'),
+    combinable: booleanColumn('combinable', false),
+    isActive: booleanColumn('is_active', true),
+    priority: integer('priority').notNull().default(0),
+    startDate: optionalTimestamp('start_date'),
+    endDate: optionalTimestamp('end_date'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    index('idx_promotions_active').on(table.isActive),
+    index('idx_promotions_scope').on(table.scopeType, table.scopeValue),
+    index('idx_promotions_updated_at').on(table.updatedAt),
+    check('promotions_type_check', sql`${table.type} in ('percentage', 'nxm')`),
+    check('promotions_scope_type_check', sql`${table.scopeType} in ('all', 'category', 'product')`),
+  ],
+)
+
 const schema = {
   users,
   products,
@@ -292,6 +321,7 @@ const schema = {
   productVariants,
   productVariantSettings,
   categories,
+  promotions,
 }
 
 module.exports = {

@@ -9,6 +9,7 @@ const {
   productVariantSettings,
   productVariants,
   products,
+  promotions,
   users,
 } = require('./schema')
 
@@ -72,6 +73,12 @@ const replicatedTables = [
     watermarkColumn: 'updated_at',
     deleteStrategy: 'hard',
     pullOrder: 100,
+  }),
+  buildReplicatedTableConfig(promotions, {
+    primaryKey: 'id',
+    watermarkColumn: 'updated_at',
+    deleteStrategy: 'hard',
+    pullOrder: 110,
   }),
 ]
 

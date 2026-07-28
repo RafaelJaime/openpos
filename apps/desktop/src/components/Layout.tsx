@@ -14,6 +14,7 @@ import {
   MembersIcon,
   OrdersIcon,
   ProductsIcon,
+  PromotionsIcon,
   SettingsIcon,
 } from './ui/icons'
 import { Sidebar } from './ui/Sidebar'
@@ -64,6 +65,12 @@ export default function Layout({ children, currentPage, onNavigate }: LayoutProp
       description: t('categoryManagement.subtitle'),
     },
     {
+      id: 'promotions',
+      label: t('navigation.promotions'),
+      icon: <PromotionsIcon class="w-5 h-5" />,
+      description: t('promotionManagement.subtitle'),
+    },
+    {
       id: 'customers',
       label: t('navigation.customers'),
       icon: <CustomersIcon class="w-5 h-5" />,
@@ -88,7 +95,7 @@ export default function Layout({ children, currentPage, onNavigate }: LayoutProp
       description: t('settings.subtitle'),
     },
   ].filter((item) => {
-    if (item.id === 'members' || item.id === 'categories') {
+    if (item.id === 'members' || item.id === 'categories' || item.id === 'promotions') {
       return user && (user.role === 'admin' || user.role === 'manager')
     }
     if (item.id === 'analytics') {
