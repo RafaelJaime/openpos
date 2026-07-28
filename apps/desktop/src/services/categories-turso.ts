@@ -4,6 +4,7 @@ export interface Category {
   id: string
   name: string
   image?: string
+  parentId?: string | null
   sortOrder: number
   isActive: boolean
   createdAt: string
@@ -14,6 +15,7 @@ interface DatabaseCategory {
   id: number
   name: string
   image?: string
+  parent_id: number | null
   sort_order: number
   is_active: number
   created_at: string
@@ -38,6 +40,7 @@ export class CategoryService {
       id: dbCategory.id.toString(),
       name: dbCategory.name,
       image: dbCategory.image || undefined,
+      parentId: dbCategory.parent_id != null ? dbCategory.parent_id.toString() : null,
       sortOrder: dbCategory.sort_order ?? 0,
       isActive: Boolean(dbCategory.is_active),
       createdAt: dbCategory.created_at,
@@ -130,6 +133,32 @@ export class CategoryService {
     return conflicts.length > 0
   }
 
+  // All descendant category ids of `id` (used to prevent parent cycles).
+  private async getDescendantIds(id: string): Promise<Set<string>> {
+    const rows = await query<{ id: number; parent_id: number | null }>('SELECT id, parent_id FROM categories')
+    const childrenByParent = new Map<string, string[]>()
+    for (const row of rows) {
+      const parent = row.parent_id != null ? row.parent_id.toString() : null
+      if (parent) {
+        const siblings = childrenByParent.get(parent) ?? []
+        siblings.push(row.id.toString())
+        childrenByParent.set(parent, siblings)
+      }
+    }
+    const descendants = new Set<string>()
+    const stack = [id]
+    while (stack.length > 0) {
+      const current = stack.pop() as string
+      for (const child of childrenByParent.get(current) ?? []) {
+        if (!descendants.has(child)) {
+          descendants.add(child)
+          stack.push(child)
+        }
+      }
+    }
+    return descendants
+  }
+
   async createCategory(
     categoryData: Omit<Category, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<{ success: boolean; category?: Category; error?: string }> {
@@ -145,16 +174,18 @@ export class CategoryService {
 
       const now = new Date().toISOString()
       const sortOrder = Number.isFinite(categoryData.sortOrder) ? Math.trunc(categoryData.sortOrder) : 0
+      const parentId = categoryData.parentId ? parseInt(categoryData.parentId, 10) : null
       const result = await execute(
-        `INSERT INTO categories (name, image, sort_order, is_active, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [name, categoryData.image || null, sortOrder, categoryData.isActive ? 1 : 0, now, now],
+        `INSERT INTO categories (name, image, parent_id, sort_order, is_active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [name, categoryData.image || null, parentId, sortOrder, categoryData.isActive ? 1 : 0, now, now],
       )
 
       const newCategory: Category = {
         id: result.lastInsertId.toString(),
         name,
         image: categoryData.image,
+        parentId: parentId != null ? parentId.toString() : null,
         sortOrder,
         isActive: categoryData.isActive,
         createdAt: now,
@@ -187,6 +218,17 @@ export class CategoryService {
         return { success: false, error: 'A category with this name already exists' }
       }
 
+      let nextParentId = existing.parentId ?? null
+      if (updates.parentId !== undefined) {
+        nextParentId = updates.parentId || null
+        if (nextParentId === id) {
+          return { success: false, error: 'A category cannot be its own parent' }
+        }
+        if (nextParentId && (await this.getDescendantIds(id)).has(nextParentId)) {
+          return { success: false, error: 'Cannot move a category under one of its own subcategories' }
+        }
+      }
+
       const fields: string[] = []
       const values: unknown[] = []
 
@@ -197,6 +239,10 @@ export class CategoryService {
       if (updates.image !== undefined) {
         fields.push('image = ?')
         values.push(updates.image || null)
+      }
+      if (updates.parentId !== undefined) {
+        fields.push('parent_id = ?')
+        values.push(nextParentId ? parseInt(nextParentId, 10) : null)
       }
       if (updates.sortOrder !== undefined) {
         fields.push('sort_order = ?')
@@ -227,6 +273,7 @@ export class CategoryService {
         ...existing,
         name: nextName,
         image: updates.image !== undefined ? updates.image : existing.image,
+        parentId: nextParentId,
         sortOrder:
           updates.sortOrder !== undefined && Number.isFinite(updates.sortOrder)
             ? Math.trunc(updates.sortOrder)
@@ -244,6 +291,11 @@ export class CategoryService {
 
   async deleteCategory(id: string): Promise<{ success: boolean; error?: string }> {
     try {
+      // Promote any children to top-level so they are not orphaned.
+      await execute('UPDATE categories SET parent_id = NULL, updated_at = ? WHERE parent_id = ?', [
+        new Date().toISOString(),
+        parseInt(id, 10),
+      ])
       await execute('DELETE FROM categories WHERE id = ?', [parseInt(id, 10)])
       return { success: true }
     } catch (error) {
