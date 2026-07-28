@@ -612,6 +612,63 @@ export default function Orders() {
     return sum + price * item.quantity
   }, 0)
 
+  // Final total of the in-progress POS cart (discount + tax), used by the
+  // "open dataphone" action to charge the current amount.
+  const posDiscount = computeCartPricing(
+    newOrder.items.map((item) => {
+      const product = getProductById(item.productId)
+      const variant = item.variantId
+        ? productsWithVariants[item.productId]?.variants?.find((v) => v.id === item.variantId)
+        : undefined
+      return {
+        productId: item.productId,
+        category: product?.category ?? '',
+        unitPrice: variant?.price ?? product?.price ?? 0,
+        quantity: item.quantity,
+        variantId: item.variantId,
+      }
+    }),
+    promotions,
+    { now: new Date().toISOString(), categoryAncestors },
+  ).totalDiscount
+  const posTaxBase = posSubtotal - posDiscount
+  const posTotal = posTaxBase + (taxEnabled ? posTaxBase * taxRate : 0)
+
+  // Open the BBVA dataphone for the current cart total, without finalizing the order.
+  const handleOpenDataphone = async () => {
+    if (newOrder.items.length === 0) {
+      toast.error(t('orders.addItemError'))
+      return
+    }
+    try {
+      setIsLoading(true)
+      const orderNumber = orderNumberFromId(`${Date.now()}`)
+      const itemsSummary = newOrder.items
+        .map((item) => `${item.quantity}x ${getProductById(item.productId)?.name ?? ''}`)
+        .join(', ')
+      const payment = await chargeWithTerminal({
+        amountCents: amountToCents(posTotal),
+        orderNumber,
+        description: buildPaymentConcept({
+          storeName: companySettings?.name ?? '',
+          orderNumber,
+          itemsSummary,
+          thankYou: companySettings?.receiptFooter || t('orders.receiptFooter'),
+          template: companySettings?.paymentConceptTemplate,
+        }),
+      })
+      if (payment.status === 'approved') {
+        toast.success(t('orders.paymentApproved'))
+      } else {
+        toast.error(t('orders.paymentNotApproved'))
+      }
+    } catch (_err) {
+      toast.error(t('errors.generic'))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const handleUpdateStatus = async (orderId: string, status: Order['status']) => {
     if ((status === 'cancelled' || status === 'completed') && !canManageOrderLifecycle) {
       toast.error('Only managers and admins can cancel or complete orders')
@@ -980,20 +1037,25 @@ export default function Orders() {
   if (posMode) {
     return (
       <div class="fixed inset-0 z-50 flex flex-col bg-canvas">
-        <div class="flex items-center justify-between gap-3 border-b border-fog-border p-4">
-          <div class="min-w-0">
-            <div class="text-lg font-semibold text-void ">{t('orders.posMode')}</div>
-            <div class="text-sm text-graphite ">
-              {newOrder.items.length} {t('orders.itemsSelected')} • {formatCurrency(posSubtotal)}
-            </div>
-          </div>
-          <div class="flex items-center gap-2">
+        <div class="flex flex-col gap-3 border-b border-fog-border p-4">
+          <div class="flex flex-wrap items-center gap-2">
             <Button type="button" variant="outline" onClick={handleExitPosMode} disabled={isLoading}>
               {t('orders.exitPosMode')}
             </Button>
             <Button type="button" onClick={handleFinishOrder} disabled={isLoading || newOrder.items.length === 0}>
               {isLoading ? t('common.loading') : t('orders.finishOrder')}
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleOpenDataphone}
+              disabled={isLoading || newOrder.items.length === 0}
+            >
+              {t('orders.openDataphone')}
+            </Button>
+          </div>
+          <div class="text-sm text-graphite ">
+            {newOrder.items.length} {t('orders.itemsSelected')}
           </div>
         </div>
 

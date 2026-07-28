@@ -331,6 +331,8 @@
     "orderCreated": "Order created successfully",
     "orderCompleted": "Order completed and marked as paid",
     "paymentNotApproved": "Payment was not approved. The order was not charged.",
+    "paymentApproved": "Payment approved",
+    "openDataphone": "Open dataphone",
     "posMode": "POS mode",
     "exitPosMode": "Exit POS mode",
     "finishOrder": "Finish order",
