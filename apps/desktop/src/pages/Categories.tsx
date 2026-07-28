@@ -115,6 +115,7 @@ function EditCategoryModal({ category, isOpen, categories, onClose, onSave }: Ed
   const [formData, setFormData] = useState({ name: '', image: '', parentId: '', sortOrder: 0, isActive: true })
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
 
   useEffect(() => {
     if (category && isOpen) {
@@ -128,6 +129,7 @@ function EditCategoryModal({ category, isOpen, categories, onClose, onSave }: Ed
     } else if (isOpen) {
       setFormData({ name: '', image: '', parentId: '', sortOrder: 0, isActive: true })
     }
+    setShowEmojiPicker(false)
     setError('')
   }, [category, isOpen])
 
@@ -227,20 +229,48 @@ function EditCategoryModal({ category, isOpen, categories, onClose, onSave }: Ed
 
             <div>
               <span class="mb-2 block text-sm font-medium text-void">{t('categoryManagement.categoryImage')}</span>
-              <div class="flex items-center gap-4">
-                <div class="flex h-20 w-20 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk">
-                  {formData.image ? (
-                    isDataUrlImage(formData.image) ? (
-                      <img src={formData.image} alt={formData.name} class="h-full w-full object-cover" />
+              <div class="flex items-start gap-4">
+                <div class="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowEmojiPicker((value) => !value)}
+                    aria-label={t('categoryManagement.orChooseEmoji')}
+                    class="flex h-20 w-20 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk transition-colors hover:border-void"
+                  >
+                    {formData.image ? (
+                      isDataUrlImage(formData.image) ? (
+                        <img src={formData.image} alt={formData.name} class="h-full w-full object-cover" />
+                      ) : (
+                        <span class="text-4xl">{formData.image}</span>
+                      )
                     ) : (
-                      <span class="text-4xl">{formData.image}</span>
-                    )
-                  ) : (
-                    <span class="text-2xl">{getCategoryIcon(formData.name)}</span>
+                      <span class="text-2xl">{getCategoryIcon(formData.name)}</span>
+                    )}
+                  </button>
+                  {showEmojiPicker && (
+                    <div class="absolute left-0 z-20 mt-2 w-64 rounded-cards border border-fog-border bg-canvas p-2 shadow-sm">
+                      <div class="flex max-h-40 flex-wrap gap-1 overflow-y-auto">
+                        {CATEGORY_EMOJIS.map((emoji) => (
+                          <button
+                            key={emoji}
+                            type="button"
+                            onClick={() => {
+                              setFormData((prev) => ({ ...prev, image: emoji }))
+                              setShowEmojiPicker(false)
+                            }}
+                            class={`flex h-9 w-9 items-center justify-center rounded-cards border text-lg transition-colors hover:bg-chalk ${
+                              formData.image === emoji ? 'border-void bg-chalk' : 'border-fog-border'
+                            }`}
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
                 <div>
-                  <p class="mt-1 text-xs text-graphite ">{t('categoryManagement.imageHelp')}</p>
+                  <p class="mt-1 text-xs text-graphite ">{t('categoryManagement.clickIconForEmoji')}</p>
                   <div class="mt-3 flex items-center gap-2">
                     <label class="inline-flex cursor-pointer items-center rounded-cards border border-fog-border bg-chalk px-4 py-2 text-sm font-medium text-void transition-colors hover:bg-chalk ">
                       <span>
@@ -265,23 +295,6 @@ function EditCategoryModal({ category, isOpen, categories, onClose, onSave }: Ed
                         {t('categoryManagement.removeImage')}
                       </Button>
                     )}
-                  </div>
-                  <div class="mt-3">
-                    <p class="mb-1 text-xs text-graphite ">{t('categoryManagement.orChooseEmoji')}</p>
-                    <div class="flex max-h-28 flex-wrap gap-1 overflow-y-auto">
-                      {CATEGORY_EMOJIS.map((emoji) => (
-                        <button
-                          key={emoji}
-                          type="button"
-                          onClick={() => setFormData((prev) => ({ ...prev, image: emoji }))}
-                          class={`flex h-9 w-9 items-center justify-center rounded-cards border text-lg transition-colors hover:bg-chalk ${
-                            formData.image === emoji ? 'border-void bg-chalk' : 'border-fog-border'
-                          }`}
-                        >
-                          {emoji}
-                        </button>
-                      ))}
-                    </div>
                   </div>
                 </div>
               </div>
