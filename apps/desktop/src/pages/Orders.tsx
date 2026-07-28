@@ -150,6 +150,7 @@ export default function Orders() {
   const [categories, setCategories] = useState<Category[]>([])
   const [posMode, setPosMode] = useState(false)
   const [posCategory, setPosCategory] = useState<string | null>(null)
+  const [posProduct, setPosProduct] = useState<Product | null>(null)
   const [posCartOpen, setPosCartOpen] = useState(false)
 
   const [editOrderItems, setEditOrderItems] = useState<
@@ -586,9 +587,21 @@ export default function Orders() {
     }
   }
 
-  // POS: tap a product to add it to the order, then return to the category list.
+  // POS: tap a product. Configurable products open their variant list;
+  // simple products are added and return to the category list.
   const handlePosAddProduct = (product: Product) => {
+    if (product.variantType === 'configurable') {
+      setPosProduct(product)
+      return
+    }
     addItemToOrder(product.id)
+    setPosCategory(null)
+  }
+
+  // POS: tap a variant to add it, then return to the category list.
+  const handlePosAddVariant = (product: Product, variantId: string) => {
+    addItemToOrder(product.id, 1, variantId)
+    setPosProduct(null)
     setPosCategory(null)
   }
 
@@ -596,12 +609,14 @@ export default function Orders() {
     setNewOrder({ items: [], customerId: '', paymentMethod: 'cash', notes: '' })
     setSelectedVariantForProduct({})
     setPosCategory(null)
+    setPosProduct(null)
     setPosMode(true)
   }
 
   const handleExitPosMode = () => {
     setPosMode(false)
     setPosCategory(null)
+    setPosProduct(null)
     setNewOrder({ items: [], customerId: '', paymentMethod: 'cash', notes: '' })
     setSelectedVariantForProduct({})
   }
@@ -1065,7 +1080,47 @@ export default function Orders() {
         </div>
 
         <div class="flex-1 overflow-y-auto p-4">
-          {posCategory === null ? (
+          {posProduct !== null ? (
+            <div>
+              <div class="mb-4 flex items-center gap-3">
+                <Button type="button" variant="outline" size="sm" onClick={() => setPosProduct(null)}>
+                  ← {t('orders.backToProducts')}
+                </Button>
+                <h3 class="text-lg font-semibold text-void ">{posProduct.name}</h3>
+              </div>
+              {(() => {
+                const productVariants = (productsWithVariants[posProduct.id]?.variants ?? []).filter(
+                  (variant) => variant.isActive,
+                )
+                return productVariants.length === 0 ? (
+                  <p class="text-graphite ">{t('orders.noVariantsAvailable')}</p>
+                ) : (
+                  <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                    {productVariants.map((variant) => (
+                      <button
+                        key={variant.id}
+                        type="button"
+                        onClick={() => handlePosAddVariant(posProduct, variant.id)}
+                        disabled={variant.stock === 0}
+                        class="flex flex-col items-center gap-2 rounded-cards border border-fog-border bg-canvas p-4 transition-colors hover:bg-chalk disabled:cursor-not-allowed disabled:opacity-50 "
+                      >
+                        <ProductVisual
+                          product={posProduct}
+                          name={posProduct.name}
+                          imageUrl={getProductImageUrl(posProduct)}
+                          sizeClass="h-16 w-16"
+                        />
+                        <span class="text-center text-sm font-medium text-void ">
+                          {Object.values(variant.attributes).join(' · ') || variant.sku || posProduct.name}
+                        </span>
+                        <span class="text-sm font-bold text-void ">{formatCurrency(variant.price)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )
+              })()}
+            </div>
+          ) : posCategory === null ? (
             <div>
               {categories.length === 0 ? (
                 <p class="text-graphite ">{t('orders.noCategories')}</p>
@@ -1117,24 +1172,35 @@ export default function Orders() {
                   <p class="text-graphite ">{t('orders.noProductsAvailable')}</p>
                 ) : (
                   <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                    {categoryProducts.map((product) => (
-                      <button
-                        key={product.id}
-                        type="button"
-                        onClick={() => handlePosAddProduct(product)}
-                        disabled={product.stock === 0}
-                        class="flex flex-col items-center gap-2 rounded-cards border border-fog-border bg-canvas p-4 transition-colors hover:bg-chalk disabled:cursor-not-allowed disabled:opacity-50 "
-                      >
-                        <ProductVisual
-                          product={product}
-                          name={product.name}
-                          imageUrl={getProductImageUrl(product)}
-                          sizeClass="h-16 w-16"
-                        />
-                        <span class="text-center text-sm font-medium text-void ">{product.name}</span>
-                        <span class="text-sm font-bold text-void ">{formatCurrency(product.price)}</span>
-                      </button>
-                    ))}
+                    {categoryProducts.map((product) => {
+                      const isConfigurable = product.variantType === 'configurable'
+                      const variantList = productsWithVariants[product.id]?.variants ?? []
+                      const hasStock = isConfigurable
+                        ? variantList.some((variant) => variant.isActive && variant.stock > 0)
+                        : product.stock > 0
+                      return (
+                        <button
+                          key={product.id}
+                          type="button"
+                          onClick={() => handlePosAddProduct(product)}
+                          disabled={!hasStock}
+                          class="flex flex-col items-center gap-2 rounded-cards border border-fog-border bg-canvas p-4 transition-colors hover:bg-chalk disabled:cursor-not-allowed disabled:opacity-50 "
+                        >
+                          <ProductVisual
+                            product={product}
+                            name={product.name}
+                            imageUrl={getProductImageUrl(product)}
+                            sizeClass="h-16 w-16"
+                          />
+                          <span class="text-center text-sm font-medium text-void ">{product.name}</span>
+                          {isConfigurable ? (
+                            <span class="text-xs text-graphite ">{t('orders.selectVariant')}</span>
+                          ) : (
+                            <span class="text-sm font-bold text-void ">{formatCurrency(product.price)}</span>
+                          )}
+                        </button>
+                      )
+                    })}
                   </div>
                 )
               })()}
