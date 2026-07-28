@@ -268,6 +268,28 @@ function EditCategoryModal({ category, isOpen, categories, onClose, onSave }: Ed
   )
 }
 
+// Flatten categories into a depth-first list with nesting depth, so the table
+// can render them as an indented subtree under their parents.
+function buildCategoryTree(categories: Category[]): { category: Category; depth: number }[] {
+  const ids = new Set(categories.map((category) => category.id))
+  const childrenByParent = new Map<string | null, Category[]>()
+  for (const category of categories) {
+    const key = category.parentId && ids.has(category.parentId) ? category.parentId : null
+    const siblings = childrenByParent.get(key) ?? []
+    siblings.push(category)
+    childrenByParent.set(key, siblings)
+  }
+  const result: { category: Category; depth: number }[] = []
+  const walk = (parent: string | null, depth: number) => {
+    for (const category of childrenByParent.get(parent) ?? []) {
+      result.push({ category, depth })
+      walk(category.id, depth + 1)
+    }
+  }
+  walk(null, 0)
+  return result
+}
+
 export default function Categories() {
   const { t } = useTranslation()
   const panelClass = 'rounded-cards border border-fog-border bg-canvas '
@@ -399,14 +421,13 @@ export default function Categories() {
             <TableRow class="bg-chalk ">
               <TableHeader class="py-2 font-semibold">{t('categoryManagement.categoryImage')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('common.name')}</TableHeader>
-              <TableHeader class="py-2 font-semibold">{t('categoryManagement.parent')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('categoryManagement.order')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('common.status')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('common.actions')}</TableHeader>
             </TableRow>
           </TableHead>
           <TableBody>
-            {categories.map((category) => (
+            {buildCategoryTree(allCategories).map(({ category, depth }) => (
               <TableRow key={category.id}>
                 <TableCell>
                   <div class="flex h-10 w-10 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk">
@@ -417,9 +438,11 @@ export default function Categories() {
                     )}
                   </div>
                 </TableCell>
-                <TableCell class="font-medium text-void">{category.name}</TableCell>
-                <TableCell class="text-graphite">
-                  {allCategories.find((option) => option.id === category.parentId)?.name ?? '—'}
+                <TableCell class="font-medium text-void">
+                  <span class="flex items-center" style={{ paddingLeft: `${depth * 20}px` }}>
+                    {depth > 0 && <span class="mr-1 text-graphite">└</span>}
+                    {category.name}
+                  </span>
                 </TableCell>
                 <TableCell class="text-void">{category.sortOrder}</TableCell>
                 <TableCell>
