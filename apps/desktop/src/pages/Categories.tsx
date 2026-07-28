@@ -23,15 +23,40 @@ import { type Category, categoryService } from '../services/categories-turso'
 interface EditCategoryModalProps {
   category: Category | null
   isOpen: boolean
+  categories: Category[]
   onClose: () => void
   onSave: () => void
 }
 
-function EditCategoryModal({ category, isOpen, onClose, onSave }: EditCategoryModalProps) {
+// Descendant ids of `id` in a flat category list (to exclude invalid parents).
+function collectDescendantIds(id: string, categories: Category[]): Set<string> {
+  const childrenByParent = new Map<string, string[]>()
+  for (const category of categories) {
+    if (category.parentId) {
+      const siblings = childrenByParent.get(category.parentId) ?? []
+      siblings.push(category.id)
+      childrenByParent.set(category.parentId, siblings)
+    }
+  }
+  const descendants = new Set<string>()
+  const stack = [id]
+  while (stack.length > 0) {
+    const current = stack.pop() as string
+    for (const child of childrenByParent.get(current) ?? []) {
+      if (!descendants.has(child)) {
+        descendants.add(child)
+        stack.push(child)
+      }
+    }
+  }
+  return descendants
+}
+
+function EditCategoryModal({ category, isOpen, categories, onClose, onSave }: EditCategoryModalProps) {
   const { t } = useTranslation()
   const panelClass = 'rounded-cards border border-fog-border bg-canvas p-6 '
 
-  const [formData, setFormData] = useState({ name: '', image: '', sortOrder: 0, isActive: true })
+  const [formData, setFormData] = useState({ name: '', image: '', parentId: '', sortOrder: 0, isActive: true })
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -40,14 +65,23 @@ function EditCategoryModal({ category, isOpen, onClose, onSave }: EditCategoryMo
       setFormData({
         name: category.name,
         image: category.image || '',
+        parentId: category.parentId ?? '',
         sortOrder: category.sortOrder,
         isActive: category.isActive,
       })
     } else if (isOpen) {
-      setFormData({ name: '', image: '', sortOrder: 0, isActive: true })
+      setFormData({ name: '', image: '', parentId: '', sortOrder: 0, isActive: true })
     }
     setError('')
   }, [category, isOpen])
+
+  const excludedParentIds = category ? collectDescendantIds(category.id, categories) : new Set<string>()
+  const parentOptions = [
+    { value: '', label: t('categoryManagement.noParent') },
+    ...categories
+      .filter((option) => option.id !== category?.id && !excludedParentIds.has(option.id))
+      .map((option) => ({ value: option.id, label: option.name })),
+  ]
 
   const handleImageSelection = async (e: Event) => {
     const input = e.target as HTMLInputElement
@@ -80,12 +114,14 @@ function EditCategoryModal({ category, isOpen, onClose, onSave }: EditCategoryMo
         ? await categoryService.updateCategory(category.id, {
             name: formData.name,
             image: formData.image || undefined,
+            parentId: formData.parentId || null,
             sortOrder: formData.sortOrder,
             isActive: formData.isActive,
           })
         : await categoryService.createCategory({
             name: formData.name,
             image: formData.image || undefined,
+            parentId: formData.parentId || null,
             sortOrder: formData.sortOrder,
             isActive: formData.isActive,
           })
@@ -175,6 +211,17 @@ function EditCategoryModal({ category, isOpen, onClose, onSave }: EditCategoryMo
             </div>
 
             <div>
+              <Select
+                label={t('categoryManagement.parent')}
+                value={formData.parentId}
+                onChange={(e) => setFormData({ ...formData, parentId: (e.target as HTMLSelectElement).value })}
+                options={parentOptions}
+                class="bg-canvas"
+              />
+              <p class="mt-1 text-xs text-graphite ">{t('categoryManagement.parentHelp')}</p>
+            </div>
+
+            <div>
               <Input
                 label={t('categoryManagement.order')}
                 type="number"
@@ -226,6 +273,7 @@ export default function Categories() {
   const panelClass = 'rounded-cards border border-fog-border bg-canvas '
 
   const [categories, setCategories] = useState<Category[]>([])
+  const [allCategories, setAllCategories] = useState<Category[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
@@ -259,6 +307,7 @@ export default function Categories() {
       setIsLoading(true)
       const result = await categoryService.getCategoriesPaginated(page, pageSize)
       setCategories(result.categories)
+      setAllCategories(await categoryService.getCategories())
       setTotalCount(result.totalCount)
       setTotalPages(result.totalPages)
       setCurrentPage(result.currentPage)
@@ -350,6 +399,7 @@ export default function Categories() {
             <TableRow class="bg-chalk ">
               <TableHeader class="py-2 font-semibold">{t('categoryManagement.categoryImage')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('common.name')}</TableHeader>
+              <TableHeader class="py-2 font-semibold">{t('categoryManagement.parent')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('categoryManagement.order')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('common.status')}</TableHeader>
               <TableHeader class="py-2 font-semibold">{t('common.actions')}</TableHeader>
@@ -368,6 +418,9 @@ export default function Categories() {
                   </div>
                 </TableCell>
                 <TableCell class="font-medium text-void">{category.name}</TableCell>
+                <TableCell class="text-graphite">
+                  {allCategories.find((option) => option.id === category.parentId)?.name ?? '—'}
+                </TableCell>
                 <TableCell class="text-void">{category.sortOrder}</TableCell>
                 <TableCell>
                   <span class="inline-flex items-center rounded-chips border border-fog-border bg-chalk px-2 py-0.5 text-xs text-void">
@@ -423,6 +476,7 @@ export default function Categories() {
       <EditCategoryModal
         category={editingCategory}
         isOpen={isModalOpen}
+        categories={allCategories}
         onClose={() => {
           setIsModalOpen(false)
           setEditingCategory(null)

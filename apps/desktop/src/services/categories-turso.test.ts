@@ -51,6 +51,7 @@ describe('CategoryService', () => {
       id: '9',
       name: 'Bakery',
       image: undefined,
+      parentId: null,
       sortOrder: 5,
       isActive: true,
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -124,5 +125,51 @@ describe('CategoryService', () => {
 
     const productCascade = executeCalls.find((call) => call.sql.includes('UPDATE products SET category'))
     expect(productCascade).toBeUndefined()
+  })
+
+  it('stores parent_id when creating a subcategory', async () => {
+    const result = await categoryService.createCategory({ name: 'Cola', parentId: '9', sortOrder: 0, isActive: true })
+
+    expect(result.success).toBe(true)
+    expect(result.category?.parentId).toBe('9')
+    const insert = executeCalls.find((call) => call.sql.includes('INSERT INTO categories'))
+    expect(insert?.sql).toContain('parent_id')
+    expect(insert?.params).toContain(9)
+  })
+
+  it('rejects making a category its own parent', async () => {
+    queryImpl = async (sql) => (sql.includes('SELECT * FROM categories WHERE id') ? [sampleRow] : [])
+
+    const result = await categoryService.updateCategory('9', { parentId: '9' })
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('own parent')
+  })
+
+  it('rejects moving a category under one of its descendants', async () => {
+    queryImpl = async (sql) => {
+      if (sql.includes('SELECT * FROM categories WHERE id')) return [sampleRow]
+      if (sql.includes('SELECT id, parent_id FROM categories')) {
+        return [
+          { id: 9, parent_id: null },
+          { id: 20, parent_id: 9 },
+        ]
+      }
+      return []
+    }
+
+    const result = await categoryService.updateCategory('9', { parentId: '20' })
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('subcategor')
+  })
+
+  it('reparents children to top level before deleting a category', async () => {
+    await categoryService.deleteCategory('9')
+
+    const reparent = executeCalls.find((call) => call.sql.includes('SET parent_id = NULL'))
+    expect(reparent?.params).toContain(9)
+    const del = executeCalls.find((call) => call.sql.startsWith('DELETE FROM categories'))
+    expect(del).toBeDefined()
   })
 })
