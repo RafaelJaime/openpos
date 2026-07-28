@@ -124,6 +124,19 @@ describe('computeCartPricing', () => {
     expect(result.totalDiscount).toBe(1.5)
   })
 
+  it('applies a category offer to subcategories via the ancestors map', () => {
+    const promos = [promo({ id: '1', type: 'percentage', percent: 50, scopeType: 'category', scopeValue: 'Bebidas' })]
+    const lines = [line({ productId: '1', category: 'Cola', unitPrice: 10, quantity: 1 })]
+    const categoryAncestors = { Cola: ['Cola', 'Refrescos', 'Bebidas'] }
+
+    const withCascade = computeCartPricing(lines, promos, { now: NOW, categoryAncestors })
+    expect(withCascade.totalDiscount).toBe(5)
+
+    // Without the hierarchy it only matches the exact category name.
+    const withoutCascade = computeCartPricing(lines, promos, { now: NOW })
+    expect(withoutCascade.totalDiscount).toBe(0)
+  })
+
   it('returns zero discount when there are no active promotions', () => {
     const result = computeCartPricing([line({ productId: '1', unitPrice: 10, quantity: 2 })], [], { now: NOW })
     expect(result.totalDiscount).toBe(0)

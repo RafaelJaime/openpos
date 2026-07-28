@@ -311,8 +311,10 @@ export class OrderService {
 
       // Apply active promotions (server-authoritative) and tax on the net subtotal.
       const activePromotions = await promotionService.getActivePromotions()
+      const categoryAncestors = await promotionService.getCategoryAncestorsByName()
       const { totalDiscount: discount } = computeCartPricing(pricingLines, activePromotions, {
         now: new Date().toISOString(),
+        categoryAncestors,
       })
       const { tax: taxAmount, total } = await companySettingsService.calculateTotalWithTax(subtotal - discount)
       const now = new Date().toISOString()

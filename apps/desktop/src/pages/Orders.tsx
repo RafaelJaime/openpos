@@ -105,6 +105,7 @@ export default function Orders() {
   const [taxRate, setTaxRate] = useState<number>(0.1)
   const [taxEnabled, setTaxEnabled] = useState<boolean>(true)
   const [promotions, setPromotions] = useState<Promotion[]>([])
+  const [categoryAncestors, setCategoryAncestors] = useState<Record<string, string[]>>({})
   const [currencySymbol, setCurrencySymbol] = useState<string>('$')
   const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null)
   const [productSearch, setProductSearch] = useState('')
@@ -287,6 +288,7 @@ export default function Orders() {
       setTaxRate(settings.taxEnabled ? settings.taxPercentage / 100 : 0)
       setCurrencySymbol(settings.currencySymbol)
       setPromotions(await promotionService.getActivePromotions())
+      setCategoryAncestors(await promotionService.getCategoryAncestorsByName())
 
       // Create user mapping
       const userMapping: { [key: string]: string } = {}
@@ -1500,6 +1502,7 @@ export default function Orders() {
                       })
                       const discount = computeCartPricing(pricingLines, promotions, {
                         now: new Date().toISOString(),
+                        categoryAncestors,
                       }).totalDiscount
                       const taxBase = subtotal - discount
                       const tax = taxEnabled ? taxBase * taxRate : 0
@@ -1811,6 +1814,7 @@ export default function Orders() {
                       })
                       const discount = computeCartPricing(pricingLines, promotions, {
                         now: new Date().toISOString(),
+                        categoryAncestors,
                       }).totalDiscount
                       const taxBase = subtotal - discount
                       const tax = taxEnabled ? taxBase * taxRate : 0

@@ -60,12 +60,19 @@ export function isPromotionLive(promo: Promotion, nowISO: string): boolean {
   return true
 }
 
-export function matchesScope(promo: Promotion, line: PricingLine): boolean {
+export function matchesScope(
+  promo: Promotion,
+  line: PricingLine,
+  categoryAncestors?: Record<string, string[]>,
+): boolean {
   if (promo.scopeType === 'all') {
     return true
   }
   if (promo.scopeType === 'category') {
-    return line.category === promo.scopeValue
+    // A category-scoped promo also covers the category's subcategories: match
+    // if the promo's category is the line's category or any of its ancestors.
+    const ancestors = categoryAncestors?.[line.category] ?? [line.category]
+    return promo.scopeValue != null && ancestors.includes(promo.scopeValue)
   }
   if (promo.scopeType === 'product') {
     if (!promo.scopeValue) {
@@ -135,9 +142,12 @@ export function selectGroupDiscount(
   promos: Promotion[],
   nowISO: string,
   line: PricingLine,
+  categoryAncestors?: Record<string, string[]>,
 ): { discount: number; appliedPromotionIds: string[] } {
   const groupSubtotal = unitPrices.reduce((sum, price) => sum + price, 0)
-  const applicable = promos.filter((promo) => isPromotionLive(promo, nowISO) && matchesScope(promo, line))
+  const applicable = promos.filter(
+    (promo) => isPromotionLive(promo, nowISO) && matchesScope(promo, line, categoryAncestors),
+  )
   if (applicable.length === 0) {
     return { discount: 0, appliedPromotionIds: [] }
   }
@@ -189,7 +199,11 @@ export function selectGroupDiscount(
 }
 
 /** Apply active promotions to a cart, returning per-line and total discount. */
-export function computeCartPricing(lines: PricingLine[], promos: Promotion[], opts: { now: string }): PricingResult {
+export function computeCartPricing(
+  lines: PricingLine[],
+  promos: Promotion[],
+  opts: { now: string; categoryAncestors?: Record<string, string[]> },
+): PricingResult {
   const groups = new Map<string, PricingLine[]>()
   for (const line of lines) {
     const existing = groups.get(line.productId) ?? []
@@ -213,6 +227,7 @@ export function computeCartPricing(lines: PricingLine[], promos: Promotion[], op
       promos,
       opts.now,
       groupLines[0],
+      opts.categoryAncestors,
     )
 
     // Distribute the group discount across member lines proportionally; the

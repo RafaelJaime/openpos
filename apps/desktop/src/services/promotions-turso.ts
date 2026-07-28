@@ -91,6 +91,43 @@ export class PromotionService {
     }
   }
 
+  /**
+   * Category name -> its ancestor category names (including itself), so a
+   * promotion scoped to a parent category also applies to its subcategories.
+   * Degrades to an empty map (exact-name match) when categories aren't present.
+   */
+  async getCategoryAncestorsByName(): Promise<Record<string, string[]>> {
+    try {
+      const rows = await query<{ id: number; name: string; parent_id: number | null }>(
+        'SELECT id, name, parent_id FROM categories',
+      )
+      const byId = new Map<number, { name: string; parentId: number | null }>()
+      for (const row of rows) {
+        byId.set(row.id, { name: row.name, parentId: row.parent_id })
+      }
+      const result: Record<string, string[]> = {}
+      for (const row of rows) {
+        const chain: string[] = []
+        const seen = new Set<number>()
+        let current: number | null = row.id
+        while (current != null && !seen.has(current)) {
+          seen.add(current)
+          const node = byId.get(current)
+          if (!node) {
+            break
+          }
+          chain.push(node.name)
+          current = node.parentId
+        }
+        result[row.name] = chain
+      }
+      return result
+    } catch {
+      // Categories are optional; without them, category scope is an exact name match.
+      return {}
+    }
+  }
+
   async getPromotionsPaginated(
     page: number = 1,
     limit: number = 20,
