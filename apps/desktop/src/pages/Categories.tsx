@@ -14,6 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from '../components/ui'
+import { EmojiPicker } from '../components/ui/EmojiPicker'
 import { useAuth } from '../hooks/useAuth'
 import { useTranslation } from '../hooks/useTranslation'
 import { getCategoryIcon } from '../lib/category-icons'
@@ -56,58 +57,6 @@ function collectDescendantIds(id: string, categories: Category[]): Set<string> {
 function isDataUrlImage(value?: string | null): boolean {
   return typeof value === 'string' && value.startsWith('data:')
 }
-
-const CATEGORY_EMOJIS = [
-  '🥤',
-  '☕',
-  '🍺',
-  '🍷',
-  '🧃',
-  '🥛',
-  '🍞',
-  '🥐',
-  '🧁',
-  '🍰',
-  '🍫',
-  '🍬',
-  '🍿',
-  '🍎',
-  '🍌',
-  '🥦',
-  '🥕',
-  '🧀',
-  '🥩',
-  '🍗',
-  '🐟',
-  '🦐',
-  '🍕',
-  '🍔',
-  '🌮',
-  '🍜',
-  '🍣',
-  '🍦',
-  '🧊',
-  '🥫',
-  '🫙',
-  '🍳',
-  '🧽',
-  '🧴',
-  '🧻',
-  '📱',
-  '💻',
-  '🎮',
-  '🧸',
-  '👕',
-  '👟',
-  '💊',
-  '🛒',
-  '🏠',
-  '🌸',
-  '⚽',
-  '🏷️',
-  '📦',
-]
-
 function EditCategoryModal({ category, isOpen, categories, onClose, onSave }: EditCategoryModalProps) {
   const { t } = useTranslation()
   const panelClass = 'rounded-cards border border-fog-border bg-canvas p-6 '
@@ -248,24 +197,14 @@ function EditCategoryModal({ category, isOpen, categories, onClose, onSave }: Ed
                     )}
                   </button>
                   {showEmojiPicker && (
-                    <div class="absolute left-0 z-20 mt-2 w-64 rounded-cards border border-fog-border bg-canvas p-2 shadow-sm">
-                      <div class="flex max-h-40 flex-wrap gap-1 overflow-y-auto">
-                        {CATEGORY_EMOJIS.map((emoji) => (
-                          <button
-                            key={emoji}
-                            type="button"
-                            onClick={() => {
-                              setFormData((prev) => ({ ...prev, image: emoji }))
-                              setShowEmojiPicker(false)
-                            }}
-                            class={`flex h-9 w-9 items-center justify-center rounded-cards border text-lg transition-colors hover:bg-chalk ${
-                              formData.image === emoji ? 'border-void bg-chalk' : 'border-fog-border'
-                            }`}
-                          >
-                            {emoji}
-                          </button>
-                        ))}
-                      </div>
+                    <div class="absolute left-0 z-20 mt-2">
+                      <EmojiPicker
+                        value={isDataUrlImage(formData.image) ? undefined : formData.image}
+                        onSelect={(emoji) => {
+                          setFormData((prev) => ({ ...prev, image: emoji }))
+                          setShowEmojiPicker(false)
+                        }}
+                      />
                     </div>
                   )}
                 </div>
@@ -399,6 +338,7 @@ export default function Categories() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [emojiPickerFor, setEmojiPickerFor] = useState<string | null>(null)
 
   const toggleCollapse = (id: string) => {
     setCollapsed((prev) => {
@@ -471,6 +411,20 @@ export default function Categories() {
       const result = await categoryService.deleteCategory(id)
       if (result.success) {
         setDeleteConfirm(null)
+        await loadCategories(currentPage)
+      } else {
+        setError(result.error || t('errors.generic'))
+      }
+    } catch (_err) {
+      setError(t('errors.generic'))
+    }
+  }
+
+  const handleSetIcon = async (id: string, emoji: string) => {
+    setEmojiPickerFor(null)
+    try {
+      const result = await categoryService.updateCategory(id, { image: emoji })
+      if (result.success) {
         await loadCategories(currentPage)
       } else {
         setError(result.error || t('errors.generic'))
@@ -563,15 +517,33 @@ export default function Categories() {
                     ) : (
                       <span class="h-5 w-5 shrink-0" aria-hidden="true" />
                     )}
-                    <div class="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk">
-                      {category.image ? (
-                        isDataUrlImage(category.image) ? (
-                          <img src={category.image} alt={category.name} class="h-full w-full object-cover" />
+                    <div class="relative shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          canEditCategories && setEmojiPickerFor((prev) => (prev === category.id ? null : category.id))
+                        }
+                        disabled={!canEditCategories}
+                        aria-label={t('common.edit')}
+                        class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk transition-colors enabled:hover:border-void"
+                      >
+                        {category.image ? (
+                          isDataUrlImage(category.image) ? (
+                            <img src={category.image} alt={category.name} class="h-full w-full object-cover" />
+                          ) : (
+                            <span class="text-lg">{category.image}</span>
+                          )
                         ) : (
-                          <span class="text-lg">{category.image}</span>
-                        )
-                      ) : (
-                        <span class="text-base">{getCategoryIcon(category.name)}</span>
+                          <span class="text-base">{getCategoryIcon(category.name)}</span>
+                        )}
+                      </button>
+                      {emojiPickerFor === category.id && (
+                        <div class="absolute left-0 top-full z-30 mt-1">
+                          <EmojiPicker
+                            value={isDataUrlImage(category.image) ? undefined : category.image}
+                            onSelect={(emoji) => handleSetIcon(category.id, emoji)}
+                          />
+                        </div>
                       )}
                     </div>
                     <span>{category.name}</span>
