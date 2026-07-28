@@ -608,19 +608,6 @@ export default function Orders() {
     setPosCategory(null)
   }
 
-  // POS: step back one attribute in the variant picker, or return to the
-  // product list when nothing is selected yet.
-  const handlePosVariantBack = () => {
-    const slugs = Object.keys(posVariantSelection)
-    if (slugs.length === 0) {
-      setPosProduct(null)
-      return
-    }
-    const next = { ...posVariantSelection }
-    delete next[slugs[slugs.length - 1]]
-    setPosVariantSelection(next)
-  }
-
   const handleEnterPosMode = () => {
     setNewOrder({ items: [], customerId: '', paymentMethod: 'cash', notes: '' })
     setSelectedVariantForProduct({})
@@ -1101,13 +1088,10 @@ export default function Orders() {
           {posProduct !== null ? (
             <div>
               <div class="mb-4 flex flex-wrap items-center gap-3">
-                <Button type="button" variant="outline" size="sm" onClick={handlePosVariantBack}>
-                  ← {Object.keys(posVariantSelection).length === 0 ? t('orders.backToProducts') : t('common.back')}
+                <Button type="button" variant="outline" size="sm" onClick={() => setPosProduct(null)}>
+                  ← {t('orders.backToProducts')}
                 </Button>
                 <h3 class="text-lg font-semibold text-void ">{posProduct.name}</h3>
-                {Object.keys(posVariantSelection).length > 0 && (
-                  <span class="text-sm text-graphite ">{Object.values(posVariantSelection).join(' · ')}</span>
-                )}
               </div>
               {(() => {
                 const activeVariants = (productsWithVariants[posProduct.id]?.variants ?? []).filter(
@@ -1117,64 +1101,77 @@ export default function Orders() {
                   return <p class="text-graphite ">{t('orders.noVariantsAvailable')}</p>
                 }
                 const attributeSlugs = Object.keys(activeVariants[0].attributes)
-                const candidates = activeVariants.filter((variant) =>
-                  Object.entries(posVariantSelection).every(([slug, value]) => variant.attributes[slug] === value),
-                )
-                const currentSlug = attributeSlugs[Object.keys(posVariantSelection).length]
-                if (!currentSlug) {
-                  return <p class="text-graphite ">{t('orders.noVariantsAvailable')}</p>
-                }
-                const isLastStep = Object.keys(posVariantSelection).length === attributeSlugs.length - 1
-                const seenValues = new Set<string>()
-                const values: { value: string; hasStock: boolean; price?: number }[] = []
-                for (const variant of candidates) {
-                  const value = variant.attributes[currentSlug]
-                  if (value === undefined || seenValues.has(value)) continue
-                  seenValues.add(value)
-                  const matching = candidates.filter((candidate) => candidate.attributes[currentSlug] === value)
-                  values.push({
-                    value,
-                    hasStock: matching.some((candidate) => candidate.stock > 0),
-                    price: isLastStep ? matching[0]?.price : undefined,
-                  })
-                }
+                const selectedCount = attributeSlugs.filter((slug) => posVariantSelection[slug] !== undefined).length
+
+                // One row per attribute; reveal the next row once the previous is chosen.
                 return (
-                  <div>
-                    <div class="mb-3 text-sm font-medium capitalize text-graphite ">{currentSlug}</div>
-                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                      {values.map(({ value, hasStock, price }) => (
-                        <button
-                          key={value}
-                          type="button"
-                          disabled={!hasStock}
-                          onClick={() => {
-                            const nextSelection = { ...posVariantSelection, [currentSlug]: value }
-                            if (Object.keys(nextSelection).length === attributeSlugs.length) {
-                              const match = activeVariants.find((variant) =>
-                                attributeSlugs.every((slug) => variant.attributes[slug] === nextSelection[slug]),
+                  <div class="space-y-6">
+                    {attributeSlugs.slice(0, selectedCount + 1).map((slug, rowIndex) => {
+                      const priorCandidates = activeVariants.filter((variant) =>
+                        attributeSlugs
+                          .slice(0, rowIndex)
+                          .every((priorSlug) => variant.attributes[priorSlug] === posVariantSelection[priorSlug]),
+                      )
+                      const isLastAttribute = rowIndex === attributeSlugs.length - 1
+                      const seenValues = new Set<string>()
+                      const values: { value: string; hasStock: boolean; price?: number }[] = []
+                      for (const variant of priorCandidates) {
+                        const value = variant.attributes[slug]
+                        if (value === undefined || seenValues.has(value)) continue
+                        seenValues.add(value)
+                        const matching = priorCandidates.filter((candidate) => candidate.attributes[slug] === value)
+                        values.push({
+                          value,
+                          hasStock: matching.some((candidate) => candidate.stock > 0),
+                          price: isLastAttribute ? matching[0]?.price : undefined,
+                        })
+                      }
+                      return (
+                        <div key={slug}>
+                          <div class="mb-2 text-sm font-medium capitalize text-graphite ">{slug}</div>
+                          <div class="flex flex-wrap gap-2">
+                            {values.map(({ value, hasStock, price }) => {
+                              const isSelected = posVariantSelection[slug] === value
+                              return (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  disabled={!hasStock}
+                                  onClick={() => {
+                                    const nextSelection: Record<string, string> = {}
+                                    for (const priorSlug of attributeSlugs.slice(0, rowIndex)) {
+                                      nextSelection[priorSlug] = posVariantSelection[priorSlug]
+                                    }
+                                    nextSelection[slug] = value
+                                    if (Object.keys(nextSelection).length === attributeSlugs.length) {
+                                      const match = activeVariants.find((variant) =>
+                                        attributeSlugs.every(
+                                          (attributeSlug) =>
+                                            variant.attributes[attributeSlug] === nextSelection[attributeSlug],
+                                        ),
+                                      )
+                                      if (match) {
+                                        handlePosAddVariant(posProduct, match.id)
+                                      }
+                                    } else {
+                                      setPosVariantSelection(nextSelection)
+                                    }
+                                  }}
+                                  class={`rounded-cards border px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                                    isSelected
+                                      ? 'border-void bg-chalk text-void'
+                                      : 'border-fog-border bg-canvas text-void hover:bg-chalk'
+                                  }`}
+                                >
+                                  {value}
+                                  {price !== undefined ? ` · ${formatCurrency(price)}` : ''}
+                                </button>
                               )
-                              if (match) {
-                                handlePosAddVariant(posProduct, match.id)
-                              }
-                            } else {
-                              setPosVariantSelection(nextSelection)
-                            }
-                          }}
-                          class="flex flex-col items-center gap-2 rounded-cards border border-fog-border bg-canvas p-4 transition-colors hover:bg-chalk disabled:cursor-not-allowed disabled:opacity-50 "
-                        >
-                          <ProductVisual
-                            product={posProduct}
-                            name={posProduct.name}
-                            imageUrl={getProductImageUrl(posProduct)}
-                            sizeClass="h-16 w-16"
-                          />
-                          <span class="text-center text-sm font-medium text-void ">{value}</span>
-                          {price !== undefined && (
-                            <span class="text-sm font-bold text-void ">{formatCurrency(price)}</span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 )
               })()}
