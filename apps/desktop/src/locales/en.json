@@ -905,6 +905,7 @@
     "categoryName": "Category name",
     "categoryImage": "Image",
     "orChooseEmoji": "Or choose an icon",
+    "clickIconForEmoji": "Click the icon to pick an emoji",
     "parent": "Parent category",
     "parentHelp": "Offers on a parent category also apply to its subcategories.",
     "noParent": "None (top level)",
