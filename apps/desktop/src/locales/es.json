@@ -855,6 +855,7 @@
     "editCategory": "Editar Categoría",
     "categoryName": "Nombre de categoría",
     "categoryImage": "Imagen",
+    "orChooseEmoji": "O elige un icono",
     "parent": "Categoría padre",
     "parentHelp": "Las ofertas en una categoría padre también aplican a sus subcategorías.",
     "noParent": "Ninguna (nivel superior)",
