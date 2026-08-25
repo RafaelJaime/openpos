@@ -225,6 +225,16 @@ function createRemoteDatabase() {
       product_id INTEGER,
       updated_at TEXT
     );
+
+    CREATE TABLE categories (
+      id INTEGER PRIMARY KEY,
+      updated_at TEXT
+    );
+
+    CREATE TABLE promotions (
+      id INTEGER PRIMARY KEY,
+      updated_at TEXT
+    );
   `)
 
   return db
