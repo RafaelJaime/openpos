@@ -85,6 +85,35 @@ function createLocalDatabase() {
       deleted_at TEXT
     );
 
+    CREATE TABLE categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      image TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      parent_id INTEGER
+    );
+
+    CREATE TABLE promotions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      percent REAL,
+      buy_n INTEGER,
+      pay_m INTEGER,
+      scope_type TEXT NOT NULL,
+      scope_value TEXT,
+      combinable INTEGER NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      priority INTEGER NOT NULL DEFAULT 0,
+      start_date TEXT,
+      end_date TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE sync_outbox (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       table_name TEXT NOT NULL,
@@ -223,16 +252,6 @@ function createRemoteDatabase() {
     CREATE TABLE product_variant_settings (
       id INTEGER PRIMARY KEY,
       product_id INTEGER,
-      updated_at TEXT
-    );
-
-    CREATE TABLE categories (
-      id INTEGER PRIMARY KEY,
-      updated_at TEXT
-    );
-
-    CREATE TABLE promotions (
-      id INTEGER PRIMARY KEY,
       updated_at TEXT
     );
   `)
