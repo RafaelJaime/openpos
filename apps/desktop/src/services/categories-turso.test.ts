@@ -9,17 +9,21 @@ let queryImpl: (sql: string, params: unknown[]) => Promise<unknown[]>
 const queryCalls: QueryCall[] = []
 const executeCalls: QueryCall[] = []
 
-const query = vi.fn(async (sql: string, params: unknown[] = []) => {
-  queryCalls.push({ sql, params })
-  return queryImpl(sql, params)
-})
+const { query, execute } = vi.hoisted(() => ({
+  query: vi.fn(async (sql: string, params: unknown[] = []) => {
+    queryCalls.push({ sql, params })
+    return queryImpl(sql, params)
+  }),
+  execute: vi.fn(async (sql: string, params: unknown[] = []) => {
+    executeCalls.push({ sql, params })
+    return { lastInsertId: 42, rowsAffected: 1 }
+  }),
+}))
 
-const execute = vi.fn(async (sql: string, params: unknown[] = []) => {
-  executeCalls.push({ sql, params })
-  return { lastInsertId: 42, rowsAffected: 1 }
-})
-
-mock.module('../lib/db-adapter', () => ({ query, execute }))
+vi.mock('../lib/db-adapter', () => ({
+  query,
+  execute,
+}))
 
 const { categoryService } = await import('./categories-turso')
 
