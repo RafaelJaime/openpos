@@ -16,15 +16,17 @@ import {
   TableRow,
 } from '../components/ui'
 import { useTranslation } from '../hooks/useTranslation'
-import { isDesktop } from '../lib/platform'
+import { computeCartPricing, type PricingLine } from '../lib/promotions'
 import { authService } from '../services/auth-turso'
+import { type Category, categoryService } from '../services/categories-turso'
 import { type CompanySettings, companySettingsService } from '../services/company-settings-turso'
 import { type Customer, customerService } from '../services/customers-turso'
 import { type Order, orderService } from '../services/orders-turso'
+import { amountToCents, buildPaymentConcept, chargeWithTerminal, orderNumberFromId } from '../services/payment-terminal'
 import { formatReceiptData, type PrintReceiptData, printThermalReceipt } from '../services/print-service'
 import { resolveProductImageUrls } from '../services/product-images'
 import { type Product, type ProductWithVariants, productService } from '../services/products-turso'
-import { createReceiptPrintJob, getPrintJob, getPrintStations, type PrintStation } from '../services/remote-printing'
+import { type Promotion, promotionService } from '../services/promotions-turso'
 import { userService } from '../services/users-turso'
 
 const getCategoryIcon = (category: string): string => {
@@ -102,6 +104,8 @@ export default function Orders() {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null)
   const [taxRate, setTaxRate] = useState<number>(0.1)
   const [taxEnabled, setTaxEnabled] = useState<boolean>(true)
+  const [promotions, setPromotions] = useState<Promotion[]>([])
+  const [categoryAncestors, setCategoryAncestors] = useState<Record<string, string[]>>({})
   const [currencySymbol, setCurrencySymbol] = useState<string>('$')
   const [companySettings, setCompanySettings] = useState<CompanySettings | null>(null)
   const [productSearch, setProductSearch] = useState('')
@@ -111,8 +115,6 @@ export default function Orders() {
   const [isPrinting, setIsPrinting] = useState(false)
   const [printStatus, setPrintStatus] = useState<string | null>(null)
   const [lastPrintTime, setLastPrintTime] = useState<number>(0)
-  const [printStations, setPrintStations] = useState<PrintStation[]>([])
-  const [selectedPrintStationId, setSelectedPrintStationId] = useState('')
 
   const [resolvedImageUrls, setResolvedImageUrls] = useState<Record<string, string>>({})
 
@@ -140,6 +142,14 @@ export default function Orders() {
     notes: '',
   })
 
+  // POS mode (fast category -> product tap flow inside the create-order modal)
+  const [categories, setCategories] = useState<Category[]>([])
+  const [posMode, setPosMode] = useState(false)
+  const [posCategory, setPosCategory] = useState<string | null>(null)
+  const [posProduct, setPosProduct] = useState<Product | null>(null)
+  const [posVariantSelection, setPosVariantSelection] = useState<Record<string, string>>({})
+  const [posCartOpen, setPosCartOpen] = useState(false)
+
   const [editOrderItems, setEditOrderItems] = useState<
     Array<{ productId: string; quantity: number; variantId?: string }>
   >([])
@@ -148,14 +158,18 @@ export default function Orders() {
 
   useEffect(() => {
     loadData()
-    if (!isDesktop) {
-      void loadPrintStations()
-    }
     // Get current user role
     const user = authService.getCurrentUser()
     if (user) {
       setCurrentUserRole(user.role)
     }
+    void (async () => {
+      try {
+        setCategories(await categoryService.getActiveCategories())
+      } catch (err) {
+        console.error('Failed to load categories for POS mode:', err)
+      }
+    })()
   }, [])
 
   useEffect(() => {
@@ -283,6 +297,8 @@ export default function Orders() {
       setTaxEnabled(settings.taxEnabled)
       setTaxRate(settings.taxEnabled ? settings.taxPercentage / 100 : 0)
       setCurrencySymbol(settings.currencySymbol)
+      setPromotions(await promotionService.getActivePromotions())
+      setCategoryAncestors(await promotionService.getCategoryAncestorsByName())
 
       // Create user mapping
       const userMapping: { [key: string]: string } = {}
@@ -294,16 +310,6 @@ export default function Orders() {
       toast.error((err as Error)?.message || t('errors.generic'))
     } finally {
       setIsLoading(false)
-    }
-  }
-
-  const loadPrintStations = async () => {
-    try {
-      const stations = await getPrintStations()
-      setPrintStations(stations)
-      setSelectedPrintStationId((current) => current || stations[0]?.id || '')
-    } catch (err) {
-      console.error('Failed to load print stations:', err)
     }
   }
 
@@ -414,12 +420,15 @@ export default function Orders() {
       })
 
       if (quantity > 0) {
-        const label = resolved.variantAttributes
-          ? `${resolved.productName} (${Object.entries(resolved.variantAttributes)
-              .map(([k, v]) => `${k}: ${v}`)
-              .join(', ')})`
-          : resolved.productName
-        toast.success(t('orders.itemAdded', { product: label, quantity: newQuantity }))
+        // In POS mode stay silent: the toast covers the buttons while dispatching.
+        if (!posMode) {
+          const label = resolved.variantAttributes
+            ? `${resolved.productName} (${Object.entries(resolved.variantAttributes)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join(', ')})`
+            : resolved.productName
+          toast.success(t('orders.itemAdded', { product: label, quantity: newQuantity }))
+        }
       } else {
         toast.info(t('orders.quantityUpdated', { product: resolved.productName, quantity: newQuantity }))
       }
@@ -441,7 +450,9 @@ export default function Orders() {
       ...newOrder,
       items: [...newOrder.items, { productId: resolved.productId, quantity, variantId: resolved.variantId }],
     })
-    toast.success(t('orders.itemAdded', { product: label, quantity }))
+    if (!posMode) {
+      toast.success(t('orders.itemAdded', { product: label, quantity }))
+    }
   }
 
   const handleCreateOrder = async () => {
@@ -474,6 +485,190 @@ export default function Orders() {
         setProducts(updatedProducts.filter((p) => p.isActive && p.stock > 0))
       } else {
         toast.error(result.error || t('errors.generic'))
+      }
+    } catch (_err) {
+      toast.error(t('errors.generic'))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const resetCreateModal = () => {
+    setIsCreateModalOpen(false)
+    setPosMode(false)
+    setPosCategory(null)
+    setNewOrder({
+      items: [],
+      customerId: '',
+      paymentMethod: 'cash',
+      notes: '',
+    })
+    setSelectedVariantForProduct({})
+  }
+
+  // POS "Terminar orden": create the order then mark it paid in one step.
+  const handleFinishOrder = async () => {
+    if (newOrder.items.length === 0) {
+      toast.error(t('orders.addItemError'))
+      return
+    }
+
+    try {
+      setIsLoading(true)
+      const result = await orderService.createOrder(newOrder)
+
+      if (result.success && result.order) {
+        // BBVA TPV: charge the dataphone before marking the sale paid.
+        if (companySettings?.bbvaTpvEnabled) {
+          const itemsSummary = result.order.items.map((item) => `${item.quantity}x ${item.productName}`).join(', ')
+          const orderNumber = orderNumberFromId(result.order.id)
+          const payment = await chargeWithTerminal({
+            amountCents: amountToCents(result.order.total),
+            orderNumber,
+            description: buildPaymentConcept({
+              storeName: companySettings.name,
+              orderNumber,
+              itemsSummary,
+              thankYou: companySettings.receiptFooter || t('orders.receiptFooter'),
+              template: companySettings.paymentConceptTemplate,
+            }),
+          })
+          if (payment.status !== 'approved') {
+            // Roll back the pending order so the cart stays intact for a retry.
+            await orderService.deleteOrder(result.order.id)
+            toast.error(
+              payment.status === 'unavailable' ? t('orders.dataphoneNotFound') : t('orders.paymentNotApproved'),
+            )
+            return
+          }
+        }
+
+        const paymentMethod = companySettings?.bbvaTpvEnabled ? 'card' : newOrder.paymentMethod
+        const paidResult = await orderService.updateOrderStatus(result.order.id, 'paid', paymentMethod)
+        const finalOrder = paidResult.success && paidResult.order ? paidResult.order : result.order
+
+        toast.success(t('orders.orderCompleted'))
+        const newOrdersList = [...allOrders, finalOrder]
+        setAllOrders(newOrdersList)
+        setOrders(newOrdersList)
+
+        // Stay in POS mode ready for the next customer: clear the cart and
+        // return to the category grid without closing the modal.
+        setNewOrder({ items: [], customerId: '', paymentMethod: 'cash', notes: '' })
+        setSelectedVariantForProduct({})
+        setPosCategory(null)
+
+        await loadData(selectedDateFilter)
+        const updatedProducts = await productService.getProducts()
+        setProducts(updatedProducts.filter((p) => p.isActive && p.stock > 0))
+      } else {
+        toast.error(result.error || t('errors.generic'))
+      }
+    } catch (_err) {
+      toast.error(t('errors.generic'))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // POS: tap a product. Configurable products open their variant list;
+  // simple products are added and return to the category list.
+  const handlePosAddProduct = (product: Product) => {
+    if (product.variantType === 'configurable') {
+      setPosVariantSelection({})
+      setPosProduct(product)
+      return
+    }
+    addItemToOrder(product.id)
+    setPosCategory(null)
+  }
+
+  // POS: tap a variant to add it, then return to the category list.
+  const handlePosAddVariant = (product: Product, variantId: string) => {
+    addItemToOrder(product.id, 1, variantId)
+    setPosVariantSelection({})
+    setPosProduct(null)
+    setPosCategory(null)
+  }
+
+  const handleEnterPosMode = () => {
+    setNewOrder({ items: [], customerId: '', paymentMethod: 'cash', notes: '' })
+    setSelectedVariantForProduct({})
+    setPosCategory(null)
+    setPosProduct(null)
+    setPosVariantSelection({})
+    setPosMode(true)
+  }
+
+  const handleExitPosMode = () => {
+    setPosMode(false)
+    setPosCategory(null)
+    setPosProduct(null)
+    setPosVariantSelection({})
+    setNewOrder({ items: [], customerId: '', paymentMethod: 'cash', notes: '' })
+    setSelectedVariantForProduct({})
+  }
+
+  const posSubtotal = newOrder.items.reduce((sum, item) => {
+    const product = getProductById(item.productId)
+    const variant = item.variantId
+      ? productsWithVariants[item.productId]?.variants?.find((v) => v.id === item.variantId)
+      : undefined
+    const price = variant?.price ?? product?.price ?? 0
+    return sum + price * item.quantity
+  }, 0)
+
+  // Final total of the in-progress POS cart (discount + tax), used by the
+  // "open dataphone" action to charge the current amount.
+  const posDiscount = computeCartPricing(
+    newOrder.items.map((item) => {
+      const product = getProductById(item.productId)
+      const variant = item.variantId
+        ? productsWithVariants[item.productId]?.variants?.find((v) => v.id === item.variantId)
+        : undefined
+      return {
+        productId: item.productId,
+        category: product?.category ?? '',
+        unitPrice: variant?.price ?? product?.price ?? 0,
+        quantity: item.quantity,
+        variantId: item.variantId,
+      }
+    }),
+    promotions,
+    { now: new Date().toISOString(), categoryAncestors },
+  ).totalDiscount
+  const posTaxBase = posSubtotal - posDiscount
+  const posTotal = posTaxBase + (taxEnabled ? posTaxBase * taxRate : 0)
+
+  // Open the BBVA dataphone for the current cart total, without finalizing the order.
+  const handleOpenDataphone = async () => {
+    if (newOrder.items.length === 0) {
+      toast.error(t('orders.addItemError'))
+      return
+    }
+    try {
+      setIsLoading(true)
+      const orderNumber = orderNumberFromId(`${Date.now()}`)
+      const itemsSummary = newOrder.items
+        .map((item) => `${item.quantity}x ${getProductById(item.productId)?.name ?? ''}`)
+        .join(', ')
+      const payment = await chargeWithTerminal({
+        amountCents: amountToCents(posTotal),
+        orderNumber,
+        description: buildPaymentConcept({
+          storeName: companySettings?.name ?? '',
+          orderNumber,
+          itemsSummary,
+          thankYou: companySettings?.receiptFooter || t('orders.receiptFooter'),
+          template: companySettings?.paymentConceptTemplate,
+        }),
+      })
+      if (payment.status === 'approved') {
+        toast.success(t('orders.paymentApproved'))
+      } else if (payment.status === 'unavailable') {
+        toast.error(t('orders.dataphoneNotFound'))
+      } else {
+        toast.error(t('orders.paymentNotApproved'))
       }
     } catch (_err) {
       toast.error(t('errors.generic'))
@@ -556,7 +751,7 @@ export default function Orders() {
 
       // Verify variant exists and is active
       const variant = productVariants?.variants?.find((v) => v.id === selectedVariantId)
-      if (!variant || !variant.isActive) {
+      if (!variant?.isActive) {
         toast.error(`Selected variant is not available for ${productName}`)
         return
       }
@@ -750,11 +945,10 @@ export default function Orders() {
     setIsPrinting(true)
     setPrintStatus(null)
     let timeoutId: ReturnType<typeof setTimeout> | null = null
-    let clearPrintStatusAfterFinish = true
 
     try {
       // Validate order data
-      if (!order || !order.id || !order.items || order.items.length === 0) {
+      if (!order?.id || !order.items || order.items.length === 0) {
         throw new Error('Invalid order data')
       }
 
@@ -762,25 +956,6 @@ export default function Orders() {
 
       if (!receiptData) {
         throw new Error('Could not load company settings')
-      }
-
-      if (!isDesktop) {
-        if (!selectedPrintStationId) {
-          throw new Error('No print station is selected')
-        }
-
-        const selectedStation = printStations.find((station) => station.id === selectedPrintStationId)
-        const job = await createReceiptPrintJob({
-          stationId: selectedPrintStationId,
-          orderId: order.id,
-          payload: receiptData,
-        })
-        const stationName = selectedStation?.name || selectedPrintStationId
-        setPrintStatus(`Print job queued for ${stationName}`)
-        toast.success(`Print job queued for ${stationName}`)
-        clearPrintStatusAfterFinish = false
-        void watchRemotePrintJob(job.id, stationName)
-        return
       }
 
       // Add timeout to prevent hanging native print commands
@@ -808,42 +983,310 @@ export default function Orders() {
         clearTimeout(timeoutId)
       }
       setIsPrinting(false)
-      if (clearPrintStatusAfterFinish) {
-        setTimeout(() => setPrintStatus(null), 3000)
-      }
+      setTimeout(() => setPrintStatus(null), 3000)
     }
-  }
-
-  const watchRemotePrintJob = async (jobId: string, stationName: string) => {
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 3000))
-
-      try {
-        const job = await getPrintJob(jobId)
-        if (job.status === 'printed') {
-          setPrintStatus(`Receipt printed by ${stationName}`)
-          toast.success(t('orders.printSuccess'))
-          setTimeout(() => setPrintStatus(null), 3000)
-          return
-        }
-
-        if (job.status === 'failed') {
-          const message = job.lastError || 'Remote print job failed'
-          setPrintStatus(`Print failed: ${message}`)
-          toast.error(message)
-          return
-        }
-      } catch (error) {
-        console.error('Failed to refresh print job status:', error)
-        return
-      }
-    }
-
-    setPrintStatus(`Print job is still queued for ${stationName}`)
   }
 
   if (isLoading && orders.length === 0) {
     return <PageLoader message={t('orders.loadingOrders')} />
+  }
+
+  // POS mode: dedicated full-screen point-of-sale screen (not a modal).
+  if (posMode) {
+    return (
+      <div class="fixed inset-0 z-50 flex flex-col bg-canvas">
+        <div class="flex flex-col gap-3 border-b border-fog-border p-4">
+          <div class="flex flex-wrap items-center gap-2">
+            <Button type="button" onClick={handleFinishOrder} disabled={isLoading || newOrder.items.length === 0}>
+              {isLoading ? t('common.loading') : t('orders.finishOrder')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleOpenDataphone}
+              disabled={isLoading || newOrder.items.length === 0}
+            >
+              {t('orders.openDataphone')}
+            </Button>
+          </div>
+          <div class="text-sm text-graphite ">
+            {t('orders.cartCount', {
+              products: newOrder.items.length,
+              items: newOrder.items.reduce((sum, item) => sum + item.quantity, 0),
+            })}
+          </div>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-4">
+          {posProduct !== null ? (
+            <div>
+              <div class="mb-4 flex flex-wrap items-center gap-3">
+                <Button type="button" variant="outline" size="sm" onClick={() => setPosProduct(null)}>
+                  ← {t('orders.backToProducts')}
+                </Button>
+                <h3 class="text-lg font-semibold text-void ">{posProduct.name}</h3>
+              </div>
+              {(() => {
+                const activeVariants = (productsWithVariants[posProduct.id]?.variants ?? []).filter(
+                  (variant) => variant.isActive,
+                )
+                if (activeVariants.length === 0) {
+                  return <p class="text-graphite ">{t('orders.noVariantsAvailable')}</p>
+                }
+                const attributeSlugs = Object.keys(activeVariants[0].attributes)
+                const selectedCount = attributeSlugs.filter((slug) => posVariantSelection[slug] !== undefined).length
+
+                // One row per attribute; reveal the next row once the previous is chosen.
+                return (
+                  <div class="space-y-6">
+                    {attributeSlugs.slice(0, selectedCount + 1).map((slug, rowIndex) => {
+                      const priorCandidates = activeVariants.filter((variant) =>
+                        attributeSlugs
+                          .slice(0, rowIndex)
+                          .every((priorSlug) => variant.attributes[priorSlug] === posVariantSelection[priorSlug]),
+                      )
+                      const isLastAttribute = rowIndex === attributeSlugs.length - 1
+                      const seenValues = new Set<string>()
+                      const values: { value: string; hasStock: boolean; price?: number }[] = []
+                      for (const variant of priorCandidates) {
+                        const value = variant.attributes[slug]
+                        if (value === undefined || seenValues.has(value)) continue
+                        seenValues.add(value)
+                        const matching = priorCandidates.filter((candidate) => candidate.attributes[slug] === value)
+                        values.push({
+                          value,
+                          hasStock: matching.some((candidate) => candidate.stock > 0),
+                          price: isLastAttribute ? matching[0]?.price : undefined,
+                        })
+                      }
+                      return (
+                        <div key={slug}>
+                          <div class="mb-2 text-sm font-medium capitalize text-graphite ">{slug}</div>
+                          <div class="flex flex-wrap gap-2">
+                            {values.map(({ value, hasStock, price }) => {
+                              const isSelected = posVariantSelection[slug] === value
+                              return (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  disabled={!hasStock}
+                                  onClick={() => {
+                                    const nextSelection: Record<string, string> = {}
+                                    for (const priorSlug of attributeSlugs.slice(0, rowIndex)) {
+                                      nextSelection[priorSlug] = posVariantSelection[priorSlug]
+                                    }
+                                    nextSelection[slug] = value
+                                    if (Object.keys(nextSelection).length === attributeSlugs.length) {
+                                      const match = activeVariants.find((variant) =>
+                                        attributeSlugs.every(
+                                          (attributeSlug) =>
+                                            variant.attributes[attributeSlug] === nextSelection[attributeSlug],
+                                        ),
+                                      )
+                                      if (match) {
+                                        handlePosAddVariant(posProduct, match.id)
+                                      }
+                                    } else {
+                                      setPosVariantSelection(nextSelection)
+                                    }
+                                  }}
+                                  class={`rounded-cards border px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                                    isSelected
+                                      ? 'border-void bg-chalk text-void'
+                                      : 'border-fog-border bg-canvas text-void hover:bg-chalk'
+                                  }`}
+                                >
+                                  {value}
+                                  {price !== undefined ? ` · ${formatCurrency(price)}` : ''}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
+            </div>
+          ) : posCategory === null ? (
+            <div>
+              {categories.length === 0 ? (
+                <p class="text-graphite ">{t('orders.noCategories')}</p>
+              ) : (
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                  {categories.map((category) => (
+                    <button
+                      key={category.id}
+                      type="button"
+                      onClick={() => setPosCategory(category.name)}
+                      class="flex flex-col items-center gap-3 rounded-cards border border-fog-border bg-canvas p-4 transition-colors hover:bg-chalk "
+                    >
+                      <div class="flex h-24 w-24 items-center justify-center overflow-hidden rounded-cards border border-fog-border bg-chalk">
+                        {category.image ? (
+                          category.image.startsWith('data:') ? (
+                            <img src={category.image} alt={category.name} class="h-full w-full object-cover" />
+                          ) : (
+                            <span class="text-5xl">{category.image}</span>
+                          )
+                        ) : (
+                          <span class="text-4xl">{getCategoryIcon(category.name)}</span>
+                        )}
+                      </div>
+                      <span class="text-center text-sm font-medium text-void ">{category.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div class="mt-6 flex flex-wrap gap-2 border-t border-fog-border pt-4 ">
+                <Button type="button" variant="outline" onClick={handleExitPosMode} disabled={isLoading}>
+                  {t('orders.exitPosMode')}
+                </Button>
+                <Button type="button" variant="outline" onClick={() => setPosCartOpen(true)}>
+                  {t('orders.viewCart')}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div class="mb-4 flex items-center gap-3">
+                <Button type="button" variant="outline" size="sm" onClick={() => setPosCategory(null)}>
+                  ← {t('orders.backToCategories')}
+                </Button>
+                <h3 class="text-lg font-semibold text-void ">{posCategory}</h3>
+              </div>
+              {(() => {
+                const categoryProducts = products.filter((product) => product.category === posCategory)
+                return categoryProducts.length === 0 ? (
+                  <p class="text-graphite ">{t('orders.noProductsAvailable')}</p>
+                ) : (
+                  <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                    {categoryProducts.map((product) => {
+                      const isConfigurable = product.variantType === 'configurable'
+                      const variantList = productsWithVariants[product.id]?.variants ?? []
+                      const hasStock = isConfigurable
+                        ? variantList.some((variant) => variant.isActive && variant.stock > 0)
+                        : product.stock > 0
+                      return (
+                        <button
+                          key={product.id}
+                          type="button"
+                          onClick={() => handlePosAddProduct(product)}
+                          disabled={!hasStock}
+                          class="flex flex-col items-center gap-2 rounded-cards border border-fog-border bg-canvas p-4 transition-colors hover:bg-chalk disabled:cursor-not-allowed disabled:opacity-50 "
+                        >
+                          <ProductVisual
+                            product={product}
+                            name={product.name}
+                            imageUrl={getProductImageUrl(product)}
+                            sizeClass="h-16 w-16"
+                          />
+                          <span class="text-center text-sm font-medium text-void ">{product.name}</span>
+                          {isConfigurable ? (
+                            <span class="text-xs text-graphite ">{t('orders.selectVariant')}</span>
+                          ) : (
+                            <span class="text-sm font-bold text-void ">{formatCurrency(product.price)}</span>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
+            </div>
+          )}
+        </div>
+
+        <Dialog isOpen={posCartOpen} onClose={() => setPosCartOpen(false)} title={t('orders.currentCart')} size="lg">
+          {newOrder.items.length === 0 ? (
+            <p class="py-8 text-center text-graphite ">{t('orders.cartEmpty')}</p>
+          ) : (
+            <div class="space-y-3">
+              {newOrder.items.map((item) => {
+                const product = getProductById(item.productId)
+                const variant = item.variantId
+                  ? productsWithVariants[item.productId]?.variants?.find((v) => v.id === item.variantId)
+                  : undefined
+                const itemPrice = variant?.price || product?.price || 0
+                const availableStock = variant?.stock || product?.stock || 0
+                const variantAttributes = variant?.attributes
+
+                return product ? (
+                  <div
+                    key={`${item.productId}-${item.variantId || 'simple'}`}
+                    class="flex flex-col sm:flex-row sm:items-center gap-3 rounded-cards border border-fog-border bg-canvas p-4 "
+                  >
+                    <div class="flex flex-1 items-start gap-3 min-w-0">
+                      <ProductVisual product={product} name={product.name} imageUrl={getProductImageUrl(product)} />
+                      <div class="flex-1 min-w-0">
+                        <div class="mb-1 font-semibold text-void truncate">{product.name}</div>
+                        {variantAttributes && (
+                          <div class="mb-2 text-xs text-void ">
+                            {Object.entries(variantAttributes).map(([k, v]) => (
+                              <span
+                                key={k}
+                                class="mr-1 mb-1 inline-flex items-center rounded-cards bg-chalk px-2 py-1 text-void "
+                              >
+                                <span class="capitalize">{k}:</span> {v}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div class="inline-block rounded-full bg-chalk px-3 py-1 text-sm text-graphite ">
+                          {formatCurrency(itemPrice)} × {item.quantity} ={' '}
+                          <span class="font-bold text-void">{formatCurrency(itemPrice * item.quantity)}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          if (item.quantity > 1) {
+                            addItemToOrder(item.productId, -1, item.variantId)
+                          } else {
+                            removeItemFromOrder(item.productId, item.variantId)
+                          }
+                        }}
+                        class="w-8 h-8 p-0 flex items-center justify-center"
+                      >
+                        −
+                      </Button>
+                      <div class="w-10 rounded border border-fog-border bg-chalk px-1 py-1 text-center text-lg font-bold ">
+                        {item.quantity}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => addItemToOrder(item.productId, 1, item.variantId)}
+                        disabled={item.quantity >= availableStock}
+                        class="w-8 h-8 p-0 flex items-center justify-center"
+                      >
+                        +
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => removeItemFromOrder(item.productId, item.variantId)}
+                        class="w-8 h-8 p-0 flex items-center justify-center ml-1"
+                      >
+                        ×
+                      </Button>
+                    </div>
+                  </div>
+                ) : null
+              })}
+            </div>
+          )}
+          <div class="mt-6 flex justify-end border-t border-fog-border pt-4">
+            <Button type="button" onClick={() => setPosCartOpen(false)}>
+              {t('common.close')}
+            </Button>
+          </div>
+        </Dialog>
+      </div>
+    )
   }
 
   return (
@@ -865,9 +1308,14 @@ export default function Orders() {
           {totalPages > 1 && ` • ${t('pagination.page')} ${currentPage} ${t('pagination.of')} ${totalPages}`}
           {searchQuery && ` • ${filteredOrders.length} ${t('orders.found')}`}
         </p>
-        <Button class="w-full sm:w-auto" onClick={() => setIsCreateModalOpen(true)}>
-          {t('orders.createOrder')}
-        </Button>
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Button variant="outline" class="w-full sm:w-auto" onClick={handleEnterPosMode}>
+            {t('orders.posMode')}
+          </Button>
+          <Button class="w-full sm:w-auto" onClick={() => setIsCreateModalOpen(true)}>
+            {t('orders.createOrder')}
+          </Button>
+        </div>
       </div>
 
       {/* Print Status Message */}
@@ -1189,11 +1637,10 @@ export default function Orders() {
       {/*  Create Order Modal */}
       <Dialog
         isOpen={isCreateModalOpen}
-        onClose={() => {
-          setIsCreateModalOpen(false)
-        }}
+        onClose={resetCreateModal}
         title={t('orders.createNewOrder')}
         size="full"
+        mobileFullScreen
       >
         <div>
           <div class="space-y-8">
@@ -1481,8 +1928,26 @@ export default function Orders() {
                         const itemPrice = variant?.price || product?.price || 0
                         return total + itemPrice * item.quantity
                       }, 0)
-                      const tax = taxEnabled ? subtotal * taxRate : 0
-                      const total = subtotal + tax
+                      const pricingLines: PricingLine[] = newOrder.items.map((item) => {
+                        const product = products.find((p) => p.id === item.productId)
+                        const variant = item.variantId
+                          ? productsWithVariants[item.productId]?.variants?.find((v) => v.id === item.variantId)
+                          : undefined
+                        return {
+                          productId: item.productId,
+                          category: product?.category ?? '',
+                          unitPrice: variant?.price || product?.price || 0,
+                          quantity: item.quantity,
+                          variantId: item.variantId,
+                        }
+                      })
+                      const discount = computeCartPricing(pricingLines, promotions, {
+                        now: new Date().toISOString(),
+                        categoryAncestors,
+                      }).totalDiscount
+                      const taxBase = subtotal - discount
+                      const tax = taxEnabled ? taxBase * taxRate : 0
+                      const total = taxBase + tax
 
                       return (
                         <div class={`${panelClass} p-4 sm:p-5`}>
@@ -1491,6 +1956,12 @@ export default function Orders() {
                               <span class="font-medium">{t('common.subtotal')}:</span>
                               <span class="font-semibold">{formatCurrency(subtotal)}</span>
                             </div>
+                            {discount > 0 && (
+                              <div class="flex justify-between text-void ">
+                                <span class="font-medium">{t('common.discount')}:</span>
+                                <span class="font-semibold">-{formatCurrency(discount)}</span>
+                              </div>
+                            )}
                             {taxEnabled && (
                               <div class="flex justify-between text-void ">
                                 <span class="font-medium">
@@ -1576,7 +2047,7 @@ export default function Orders() {
 
             {/* Action Buttons */}
             <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 border-t border-fog-border pt-6 ">
-              <Button type="button" variant="outline" onClick={() => setIsCreateModalOpen(false)} disabled={isLoading}>
+              <Button type="button" variant="outline" onClick={resetCreateModal} disabled={isLoading}>
                 {t('common.cancel')}
               </Button>
               <Button type="button" onClick={handleCreateOrder} disabled={isLoading || newOrder.items.length === 0}>
@@ -1772,8 +2243,23 @@ export default function Orders() {
                         const product = products.find((p) => p.id === item.productId)
                         return total + (product ? product.price * item.quantity : 0)
                       }, 0)
-                      const tax = taxEnabled ? subtotal * taxRate : 0
-                      const total = subtotal + tax
+                      const pricingLines: PricingLine[] = editOrderItems.map((item) => {
+                        const product = products.find((p) => p.id === item.productId)
+                        return {
+                          productId: item.productId,
+                          category: product?.category ?? '',
+                          unitPrice: product?.price ?? 0,
+                          quantity: item.quantity,
+                          variantId: item.variantId,
+                        }
+                      })
+                      const discount = computeCartPricing(pricingLines, promotions, {
+                        now: new Date().toISOString(),
+                        categoryAncestors,
+                      }).totalDiscount
+                      const taxBase = subtotal - discount
+                      const tax = taxEnabled ? taxBase * taxRate : 0
+                      const total = taxBase + tax
 
                       return (
                         <div class={`${panelClass} p-4 sm:p-5`}>
@@ -1782,6 +2268,12 @@ export default function Orders() {
                               <span class="font-medium">{t('common.subtotal')}:</span>
                               <span class="font-semibold">{formatCurrency(subtotal)}</span>
                             </div>
+                            {discount > 0 && (
+                              <div class="flex justify-between text-void ">
+                                <span class="font-medium">{t('common.discount')}:</span>
+                                <span class="font-semibold">-{formatCurrency(discount)}</span>
+                              </div>
+                            )}
                             {taxEnabled && (
                               <div class="flex justify-between text-void ">
                                 <span class="font-medium">
@@ -2027,26 +2519,10 @@ export default function Orders() {
 
               {/* Order Actions */}
               <div class="flex flex-wrap items-center gap-2 border-t border-fog-border pt-4 ">
-                {!isDesktop && (
-                  <Select
-                    value={selectedPrintStationId}
-                    onChange={(e) => setSelectedPrintStationId((e.target as HTMLSelectElement).value)}
-                    options={
-                      printStations.length > 0
-                        ? printStations.map((station) => ({
-                            value: station.id,
-                            label: `${station.name}${station.status === 'online' ? '' : ' (offline)'}`,
-                          }))
-                        : [{ value: '', label: 'No print stations' }]
-                    }
-                    disabled={printStations.length === 0 || isPrinting}
-                    class="w-full sm:w-56"
-                  />
-                )}
                 <Button
                   size="sm"
                   onClick={() => handleThermalPrint(selectedOrder)}
-                  disabled={isPrinting || (!isDesktop && !selectedPrintStationId)}
+                  disabled={isPrinting}
                   class="bg-void text-canvas"
                 >
                   {isPrinting ? t('orders.printing') : t('orders.printReceipt')}

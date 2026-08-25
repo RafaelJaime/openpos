@@ -1,16 +1,14 @@
-#!/usr/bin/env bun
-
 /**
  * Create Admin User (Interactive)
  *
- * bun run db:create-admin
+ * pnpm run db:create-admin
  */
 
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
 import { fileURLToPath } from 'node:url'
-import { connect } from '@tursodatabase/serverless'
+import { createClient } from '@libsql/client'
 import bcrypt from 'bcryptjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
@@ -38,11 +36,13 @@ async function main() {
 
   const { TURSO_DATABASE_URL: url, TURSO_AUTH_TOKEN: token } = loadEnv(envPath)
   if (!url || !token) {
-    console.error('Error: TURSO_DATABASE_URL and TURSO_AUTH_TOKEN required in apps/api/.env')
+    console.error('Error: create a store from the app, or import an existing database URL from Settings.')
     process.exit(1)
   }
 
-  const client = connect({ url, authToken: token })
+  console.warn('Warning: create-admin using a URL/token is deprecated. Create stores from the app, then configure the database in Settings.')
+
+  const client = createClient({ url, authToken: token })
 
   const existing = await client.execute('SELECT id FROM users WHERE email = ? LIMIT 1', [email.toLowerCase()])
   if (existing.rows.length > 0) {

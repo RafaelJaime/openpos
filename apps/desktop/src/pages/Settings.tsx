@@ -1,9 +1,16 @@
 import { useEffect, useState } from 'preact/hooks'
 import { toast } from 'sonner'
+import { ChangePasswordCard } from '../components/ChangePasswordCard'
+import { DatabaseSettingsCard } from '../components/DatabaseSettingsCard'
+import { ObjectStorageSettingsCard } from '../components/ObjectStorageSettingsCard'
+import { PasswordResetEmailCard } from '../components/PasswordResetEmailCard'
+import { RecoveryCodesCard } from '../components/RecoveryCodesCard'
 import { Button, Dialog, Input, LanguageSelector, PageLoader, Select } from '../components/ui'
 import { useTranslation } from '../hooks/useTranslation'
 import { requireDesktopApi } from '../lib/desktop'
+import { isDesktop } from '../lib/platform'
 import { type CompanySettings, companySettingsService, SUPPORTED_CURRENCIES } from '../services/company-settings-turso'
+import { clearStoredConnectionKey, getStoredConnectionKey } from '../services/connections'
 import { appSettingsStore } from '../stores/appSettings/appSettingsStore'
 
 const FIXED_APP_NAME = 'OpenPOS'
@@ -24,6 +31,9 @@ export default function Settings() {
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false)
   const [isResetLocalDbDialogOpen, setIsResetLocalDbDialogOpen] = useState(false)
   const [isResettingLocalDb, setIsResettingLocalDb] = useState(false)
+  const [connectionInfo, setConnectionInfo] = useState<{ key: string; storeName?: string; published?: boolean } | null>(
+    null,
+  )
 
   useEffect(() => {
     loadSettings()
@@ -37,6 +47,13 @@ export default function Settings() {
       setSettings(fixedSettings)
       setLocalSettings(fixedSettings)
       setHasChanges(false)
+      if (isDesktop) {
+        const active = await requireDesktopApi().connection.getActive()
+        setConnectionInfo(active)
+      } else {
+        const key = getStoredConnectionKey()
+        setConnectionInfo(key ? { key } : null)
+      }
     } catch (err: unknown) {
       toast.error((err as Error)?.message || t('errors.generic'))
     } finally {
@@ -283,6 +300,37 @@ export default function Settings() {
               </div>
             </div>
 
+            {/* Payments / BBVA TPV */}
+            <div class={`${panelClass} p-6`}>
+              <h2 class={sectionTitleClass}>{t('settings.paymentsTitle')}</h2>
+              <div class="space-y-4">
+                <label class="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={localSettings.bbvaTpvEnabled}
+                    onChange={(e) => handleChange('bbvaTpvEnabled', (e.target as HTMLInputElement).checked)}
+                    disabled={isSaving}
+                  />
+                  <span class="text-sm text-void">{t('settings.bbvaTpvEnabled')}</span>
+                </label>
+                {localSettings.bbvaTpvEnabled && (
+                  <div>
+                    <Input
+                      label={t('settings.paymentConceptTemplate')}
+                      value={localSettings.paymentConceptTemplate || ''}
+                      onInput={(e) =>
+                        handleChange('paymentConceptTemplate', (e.target as HTMLInputElement).value || undefined)
+                      }
+                      disabled={isSaving}
+                      class="mb-2"
+                      placeholder="{store} · {order} · {items} · {thanks}"
+                    />
+                    <span class={helperTextClass}>{t('settings.paymentConceptTemplateDesc')}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* System Preferences */}
             <div class={`${panelClass} p-6`}>
               <h2 class={sectionTitleClass}>{t('settings.systemSettings')}</h2>
@@ -306,6 +354,52 @@ export default function Settings() {
                 </div>
               </div>
             </div>
+
+            {/* Security */}
+            <div class={`${panelClass} p-6`}>
+              <h2 class={sectionTitleClass}>{t('settings.securitySettings')}</h2>
+              <span class="mb-6 block text-graphite">{t('settings.securityDesc')}</span>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <ChangePasswordCard />
+                <RecoveryCodesCard />
+                <PasswordResetEmailCard />
+                <ObjectStorageSettingsCard />
+                <DatabaseSettingsCard />
+              </div>
+            </div>
+
+            {/* Store connection */}
+            {connectionInfo?.key ? (
+              <div class={`${panelClass} p-6`}>
+                <h2 class={sectionTitleClass}>{t('connection.connectionTitle')}</h2>
+                <p class={`${helperTextClass} mb-3 break-all`}>
+                  {t('connection.key')}: {connectionInfo.key}
+                </p>
+                <p class={`${helperTextClass} mb-4`}>
+                  {connectionInfo.published ? t('connection.published') : t('connection.notPublished')}
+                </p>
+                {isDesktop ? (
+                  <div>
+                    <p class={`${helperTextClass} mb-3`}>{t('connection.leaveStoreDesc')}</p>
+                    <Button
+                      variant="outline"
+                      onClick={async () => {
+                        try {
+                          await requireDesktopApi().connection.leave()
+                          clearStoredConnectionKey()
+                          window.location.reload()
+                        } catch (error) {
+                          toast.error(error instanceof Error ? error.message : t('connection.leaveFailed'))
+                        }
+                      }}
+                    >
+                      {t('connection.leaveStore')}
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             {/* Developer Tools */}
             <div class={`${panelClass} p-6`}>

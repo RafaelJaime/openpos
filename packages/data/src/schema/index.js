@@ -41,6 +41,98 @@ const users = sqliteTable(
   ],
 )
 
+const passwordRecoveryCodes = sqliteTable(
+  'password_recovery_codes',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    codeHash: text('code_hash').notNull(),
+    createdAt: createdAt(),
+    usedAt: optionalTimestamp('used_at'),
+  },
+  (table) => [
+    uniqueIndex('idx_password_recovery_codes_code_hash_unique').on(table.codeHash),
+    index('idx_password_recovery_codes_user_id').on(table.userId),
+  ],
+)
+
+const passwordResetTokens = sqliteTable(
+  'password_reset_tokens',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    usedAt: optionalTimestamp('used_at'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    uniqueIndex('idx_password_reset_tokens_hash_unique').on(table.tokenHash),
+    index('idx_password_reset_tokens_user_id').on(table.userId),
+    index('idx_password_reset_tokens_expires_at').on(table.expiresAt),
+  ],
+)
+
+const passwordResetSettings = sqliteTable(
+  'password_reset_settings',
+  {
+    id: integer('id').primaryKey(),
+    resendApiKeyEncrypted: text('resend_api_key_encrypted'),
+    fromEmail: text('from_email'),
+    webAppUrl: text('web_app_url'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [check('password_reset_settings_singleton_check', sql`${table.id} = 1`)],
+)
+
+const objectStorageSettings = sqliteTable(
+  'object_storage_settings',
+  {
+    id: integer('id').primaryKey(),
+    endpoint: text('endpoint'),
+    region: text('region'),
+    bucket: text('bucket'),
+    accessKeyIdEncrypted: text('access_key_id_encrypted'),
+    secretAccessKeyEncrypted: text('secret_access_key_encrypted'),
+    urlTtlSeconds: integer('url_ttl_seconds').notNull().default(900),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [check('object_storage_settings_singleton_check', sql`${table.id} = 1`)],
+)
+
+const connectionMeta = sqliteTable(
+  'connection_meta',
+  {
+    id: integer('id').primaryKey(),
+    connectionKey: text('connection_key').notNull(),
+    seedVerifier: text('seed_verifier').notNull(),
+    storeName: text('store_name').notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    uniqueIndex('idx_connection_meta_connection_key_unique').on(table.connectionKey),
+    check('connection_meta_singleton_check', sql`${table.id} = 1`),
+  ],
+)
+
+const databaseSettings = sqliteTable(
+  'database_settings',
+  {
+    id: integer('id').primaryKey(),
+    databaseUrl: text('database_url'),
+    authTokenEncrypted: text('auth_token_encrypted'),
+    apiTokenEncrypted: text('api_token_encrypted'),
+    org: text('org'),
+    groupName: text('group_name'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [check('database_settings_singleton_check', sql`${table.id} = 1`)],
+)
+
 const productAttributes = sqliteTable(
   'product_attributes',
   {
@@ -155,6 +247,8 @@ const companySettings = sqliteTable(
     email: text('email'),
     website: text('website'),
     receiptFooter: text('receipt_footer'),
+    bbvaTpvEnabled: booleanColumn('bbva_tpv_enabled', false),
+    paymentConceptTemplate: text('payment_concept_template'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -171,6 +265,7 @@ const orders = sqliteTable(
     subtotal: real('subtotal').notNull(),
     tax: real('tax').notNull(),
     total: real('total').notNull(),
+    discount: real('discount').notNull().default(0),
     status: text('status').notNull(),
     paymentMethod: text('payment_method'),
     notes: text('notes'),
@@ -260,8 +355,114 @@ const orderItems = sqliteTable(
   ],
 )
 
+const categories = sqliteTable(
+  'categories',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    name: text('name').notNull(),
+    image: text('image'),
+    parentId: integer('parent_id'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    isActive: booleanColumn('is_active', true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    uniqueIndex('idx_categories_name_unique').on(table.name),
+    index('idx_categories_active').on(table.isActive),
+    index('idx_categories_parent').on(table.parentId),
+    index('idx_categories_sort_order').on(table.sortOrder),
+    index('idx_categories_updated_at').on(table.updatedAt),
+  ],
+)
+
+const promotions = sqliteTable(
+  'promotions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    name: text('name').notNull(),
+    type: text('type').notNull(),
+    percent: real('percent'),
+    buyN: integer('buy_n'),
+    payM: integer('pay_m'),
+    scopeType: text('scope_type').notNull(),
+    scopeValue: text('scope_value'),
+    combinable: booleanColumn('combinable', false),
+    isActive: booleanColumn('is_active', true),
+    priority: integer('priority').notNull().default(0),
+    startDate: optionalTimestamp('start_date'),
+    endDate: optionalTimestamp('end_date'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    index('idx_promotions_active').on(table.isActive),
+    index('idx_promotions_scope').on(table.scopeType, table.scopeValue),
+    index('idx_promotions_updated_at').on(table.updatedAt),
+    check('promotions_type_check', sql`${table.type} in ('percentage', 'nxm')`),
+    check('promotions_scope_type_check', sql`${table.scopeType} in ('all', 'category', 'product')`),
+  ],
+)
+
+const syncMetadata = sqliteTable('sync_metadata', {
+  id: integer('id').primaryKey(),
+  version: integer('version').notNull().default(0),
+})
+
+const syncOutbox = sqliteTable(
+  'sync_outbox',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    tableName: text('table_name').notNull(),
+    recordId: text('record_id').notNull(),
+    operation: text('operation').notNull().default('INSERT'),
+    rowPayload: text('row_payload'),
+    localUpdatedAt: optionalTimestamp('local_updated_at'),
+    baseRemoteUpdatedAt: optionalTimestamp('base_remote_updated_at'),
+    status: text('status').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    syncedAt: optionalTimestamp('synced_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    uniqueIndex('idx_sync_outbox_table_record_unique').on(table.tableName, table.recordId),
+    index('idx_sync_outbox_status').on(table.status),
+    index('idx_sync_outbox_updated_at').on(table.updatedAt),
+    check('sync_outbox_operation_check', sql`${table.operation} in ('INSERT', 'UPDATE', 'DELETE')`),
+    check('sync_outbox_status_check', sql`${table.status} in ('pending', 'synced', 'conflict', 'error')`),
+  ],
+)
+
+const syncState = sqliteTable('sync_state', {
+  tableName: text('table_name').primaryKey(),
+  lastPulledAt: optionalTimestamp('last_pulled_at'),
+  lastSyncAt: optionalTimestamp('last_sync_at'),
+  updatedAt: updatedAt(),
+})
+
+const orderSyncQueue = sqliteTable(
+  'order_sync_queue',
+  {
+    orderId: text('order_id').primaryKey(),
+    operation: text('operation').notNull().default('UPSERT'),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [check('order_sync_queue_operation_check', sql`${table.operation} in ('UPSERT', 'DELETE')`)],
+)
+
 const schema = {
   users,
+  passwordRecoveryCodes,
+  passwordResetTokens,
+  passwordResetSettings,
+  objectStorageSettings,
+  connectionMeta,
+  databaseSettings,
   products,
   customers,
   companySettings,
@@ -270,6 +471,12 @@ const schema = {
   productAttributes,
   productVariants,
   productVariantSettings,
+  categories,
+  promotions,
+  syncMetadata,
+  syncOutbox,
+  syncState,
+  orderSyncQueue,
 }
 
 module.exports = {

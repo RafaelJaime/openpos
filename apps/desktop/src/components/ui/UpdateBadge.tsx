@@ -256,7 +256,17 @@ export function UpdateBadge() {
   }
 
   return (
-    <div ref={wrapperRef} class="fixed bottom-4 left-4 z-50 flex flex-col items-start gap-2">
+    <div ref={wrapperRef} class="no-drag fixed bottom-4 left-4 z-50 flex flex-col items-start gap-2">
+      {popoverOpen.value && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: visual click-catcher backdrop; keyboard users toggle the badge button instead
+        // biome-ignore lint/a11y/useKeyWithClickEvents: no keyboard interaction needed for a pointer-only backdrop
+        <div
+          class="fixed inset-0 -z-10"
+          onClick={() => {
+            popoverOpen.value = false
+          }}
+        />
+      )}
       {popoverOpen.value && (
         <div
           class={`mb-1 w-72 rounded-cards border ${viewModel.borderClass} bg-canvas shadow-sm text-xs text-graphite overflow-hidden`}
