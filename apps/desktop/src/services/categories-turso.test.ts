@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 interface QueryCall {
   sql: string
@@ -9,12 +9,12 @@ let queryImpl: (sql: string, params: unknown[]) => Promise<unknown[]>
 const queryCalls: QueryCall[] = []
 const executeCalls: QueryCall[] = []
 
-const query = mock(async (sql: string, params: unknown[] = []) => {
+const query = vi.fn(async (sql: string, params: unknown[] = []) => {
   queryCalls.push({ sql, params })
   return queryImpl(sql, params)
 })
 
-const execute = mock(async (sql: string, params: unknown[] = []) => {
+const execute = vi.fn(async (sql: string, params: unknown[] = []) => {
   executeCalls.push({ sql, params })
   return { lastInsertId: 42, rowsAffected: 1 }
 })

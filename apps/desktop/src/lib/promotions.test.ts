@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { computeCartPricing, type PricingLine, type Promotion } from './promotions'
 
 const NOW = '2026-07-27T00:00:00.000Z'
