@@ -25,14 +25,14 @@ import {
 import { useAuth } from '../hooks/useAuth'
 import { useTranslation } from '../hooks/useTranslation'
 import { normalizeBarcode } from '../lib/barcodes'
+import { fileToCompressedDataUrl } from '../lib/image-encode'
+import { categoryService } from '../services/categories-turso'
 import {
   DESKTOP_REMOTE_SESSION_UNAVAILABLE_MESSAGE,
   deleteProductImage,
   extractDesktopApiConfigPath,
   extractDesktopRemoteSessionDetails,
   resolveProductImageUrls,
-  uploadProductImage,
-  validateProductImageFile,
 } from '../services/product-images'
 import { type ProductVariant, productVariantsService } from '../services/product-variants-turso'
 import { PRODUCT_CATEGORIES, type Product, type ProductWithVariants, productService } from '../services/products-turso'
@@ -132,6 +132,35 @@ function EditProductModal({ product, isOpen, resolvedImageUrl, onClose, onSave }
   const [imagePreviewUrl, setImagePreviewUrl] = useState('')
   const [temporaryPreviewUrl, setTemporaryPreviewUrl] = useState<string | null>(null)
   const [removeExistingImage, setRemoveExistingImage] = useState(false)
+  const [categoryOptions, setCategoryOptions] = useState<{ value: string; label: string }[]>([])
+
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const activeCategories = await categoryService.getActiveCategories()
+        if (cancelled) {
+          return
+        }
+        const options = activeCategories.map((category) => ({
+          value: category.name,
+          label: `${getCategoryIcon(category.name)} ${getCategoryLabel(category.name, t)}`,
+        }))
+        setCategoryOptions(options.length > 0 ? options : getCategoryOptions(t))
+      } catch (err) {
+        console.error('Failed to load categories for product form:', err)
+        if (!cancelled) {
+          setCategoryOptions(getCategoryOptions(t))
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [isOpen])
 
   const clearTemporaryPreview = () => {
     if (temporaryPreviewUrl) {
@@ -205,7 +234,7 @@ function EditProductModal({ product, isOpen, resolvedImageUrl, onClose, onSave }
     [temporaryPreviewUrl],
   )
 
-  const handleImageSelection = (e: Event) => {
+  const handleImageSelection = async (e: Event) => {
     const input = e.target as HTMLInputElement
     const file = input.files?.[0]
 
@@ -213,21 +242,19 @@ function EditProductModal({ product, isOpen, resolvedImageUrl, onClose, onSave }
       return
     }
 
-    const validationError = validateProductImageFile(file)
-    if (validationError) {
-      setError(getErrorMessage(validationError, t))
+    try {
+      const dataUrl = await fileToCompressedDataUrl(file)
+      clearTemporaryPreview()
+      setSelectedImageFile(file)
+      setImagePreviewUrl(dataUrl)
+      setFormData((prev) => ({ ...prev, image: dataUrl }))
+      setRemoveExistingImage(false)
+      setError('')
+    } catch (err) {
+      setError(getErrorMessage(err instanceof Error ? err.message : t('errors.generic'), t))
+    } finally {
       input.value = ''
-      return
     }
-
-    clearTemporaryPreview()
-    const nextPreviewUrl = URL.createObjectURL(file)
-    setTemporaryPreviewUrl(nextPreviewUrl)
-    setSelectedImageFile(file)
-    setImagePreviewUrl(nextPreviewUrl)
-    setRemoveExistingImage(false)
-    setError('')
-    input.value = ''
   }
 
   const handleRemoveImage = () => {
@@ -247,17 +274,13 @@ function EditProductModal({ product, isOpen, resolvedImageUrl, onClose, onSave }
     setError('')
 
     try {
-      const previousImageKey = product?.image?.trim() || ''
-      let uploadedImageKey: string | undefined
-      let nextImageKey = previousImageKey
+      const previousImage = product?.image?.trim() || ''
+      let nextImage = previousImage
 
       if (selectedImageFile) {
-        const uploaded = await uploadProductImage(selectedImageFile)
-        uploadedImageKey = uploaded.key
-        nextImageKey = uploaded.key
-        setImagePreviewUrl(uploaded.url)
+        nextImage = formData.image
       } else if (removeExistingImage) {
-        nextImageKey = ''
+        nextImage = ''
       }
 
       let result: { success: boolean; product?: Product; error?: string }
@@ -270,7 +293,7 @@ function EditProductModal({ product, isOpen, resolvedImageUrl, onClose, onSave }
           stock: formData.stock,
           category: formData.category,
           barcode: formData.barcode || undefined,
-          image: selectedImageFile || removeExistingImage ? nextImageKey : undefined,
+          image: selectedImageFile || removeExistingImage ? nextImage : undefined,
           isActive: formData.isActive,
           variantType: product.variantType,
         })
@@ -283,37 +306,16 @@ function EditProductModal({ product, isOpen, resolvedImageUrl, onClose, onSave }
           stock: formData.stock,
           category: formData.category,
           barcode: formData.barcode || undefined,
-          image: nextImageKey || undefined,
+          image: nextImage || undefined,
           isActive: formData.isActive,
           variantType: 'simple',
         })
       }
 
       if (result.success && result.product) {
-        let warning: string | undefined
-        const shouldDeletePreviousImage =
-          Boolean(previousImageKey) &&
-          ((Boolean(uploadedImageKey) && previousImageKey !== uploadedImageKey) || removeExistingImage)
-
-        if (shouldDeletePreviousImage && previousImageKey) {
-          try {
-            await deleteProductImage(previousImageKey)
-          } catch (deleteError) {
-            console.error('Failed to delete previous product image:', deleteError)
-            warning = removeExistingImage ? t('products.imageDeleteOnRemoveFailed') : t('products.imageDeleteFailed')
-          }
-        }
-
-        onSave(result.product, { warning })
+        onSave(result.product, {})
         onClose()
       } else {
-        if (uploadedImageKey) {
-          try {
-            await deleteProductImage(uploadedImageKey)
-          } catch (cleanupError) {
-            console.error('Failed to clean up uploaded image after product save failure:', cleanupError)
-          }
-        }
         setError(result.error || t('errors.generic'))
       }
     } catch (err) {
@@ -371,7 +373,17 @@ function EditProductModal({ product, isOpen, resolvedImageUrl, onClose, onSave }
                   }
                   required
                   placeholder={t('products.selectCategory')}
-                  options={getCategoryOptions(t)}
+                  options={
+                    formData.category && !categoryOptions.some((option) => option.value === formData.category)
+                      ? [
+                          {
+                            value: formData.category,
+                            label: `${getCategoryIcon(formData.category)} ${getCategoryLabel(formData.category, t)}`,
+                          },
+                          ...categoryOptions,
+                        ]
+                      : categoryOptions
+                  }
                   class="bg-canvas"
                 />
               </div>

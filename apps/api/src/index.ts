@@ -7,36 +7,49 @@
  */
 
 import { Hono } from 'hono'
-import { corsMiddleware } from './middleware/cors.js'
+import { parseConnectionKey } from '@openpos/data'
+import { resolveDataPlane } from './lib/connection.js'
+import { execute, probeDataPlane, query } from './lib/turso.js'
 import { authMiddleware } from './middleware/auth.js'
-import { execute, getTursoConfig, probeTursoConnection, query } from './lib/turso.js'
-import { authRouter } from './routes/auth.js'
-import { productsRouter } from './routes/products.js'
-import { ordersRouter } from './routes/orders.js'
-import { customersRouter } from './routes/customers.js'
-import { usersRouter } from './routes/users.js'
+import { corsMiddleware } from './middleware/cors.js'
+import { dataPlaneMiddleware } from './middleware/data-plane.js'
 import { analyticsRouter } from './routes/analytics.js'
-import { settingsRouter } from './routes/settings.js'
+import { authRouter } from './routes/auth.js'
+import { connectionsRouter } from './routes/connections.js'
+import { customersRouter } from './routes/customers.js'
+import { ordersRouter } from './routes/orders.js'
 import { productImagesRouter } from './routes/product-images.js'
-import { printJobsRouter } from './routes/print-jobs.js'
+import { productsRouter } from './routes/products.js'
+import { settingsRouter } from './routes/settings.js'
+import { usersRouter } from './routes/users.js'
 
 export const app = new Hono()
 
 // Global middleware
 app.use('/*', corsMiddleware)
+app.use('/api/*', dataPlaneMiddleware)
 
 // Health check (unauthenticated)
 app.get('/api/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }))
 
 // Safe DB status check for the web client badge (unauthenticated)
 app.get('/api/db-status', async (c) => {
-  const { configured } = getTursoConfig()
-  const reachable = configured ? await probeTursoConnection() : false
+  const connectionKey = parseConnectionKey(c.req.header('X-OpenPOS-Connection') || '')
+  if (connectionKey) {
+    const config = await resolveDataPlane(connectionKey)
+    const reachable = config ? await probeDataPlane(config) : false
+    return c.json({
+      status: reachable ? 'remote' : 'error',
+      mode: 'api',
+      remoteConfigured: Boolean(config),
+      lastCheckedAt: new Date().toISOString(),
+    })
+  }
 
   return c.json({
-    status: reachable ? 'remote' : 'error',
+    status: 'error',
     mode: 'api',
-    remoteConfigured: configured,
+    remoteConfigured: false,
     lastCheckedAt: new Date().toISOString(),
   })
 })
@@ -81,6 +94,7 @@ app.post('/api/execute', authMiddleware, async (c) => {
 })
 
 // Route groups
+app.route('/api/connections', connectionsRouter)
 app.route('/api/auth', authRouter)
 app.route('/api/products/images', productImagesRouter)
 app.route('/api/products', productsRouter)
@@ -89,7 +103,6 @@ app.route('/api/customers', customersRouter)
 app.route('/api/users', usersRouter)
 app.route('/api/analytics', analyticsRouter)
 app.route('/api/settings', settingsRouter)
-app.route('/api', printJobsRouter)
 
 // 404 catch-all
 app.notFound((c) => c.json({ error: `Route ${c.req.url} not found` }, 404))
@@ -116,6 +129,11 @@ if (import.meta.main && !process.env.VERCEL) {
     console.log('  POST /api/auth/hash')
     console.log('  POST /api/auth/verify')
     console.log('  GET  /api/auth/me')
+    console.log('  POST /api/auth/forgot-password')
+    console.log('  POST /api/auth/reset-password-token')
+    console.log('  GET  /api/auth/recovery-codes')
+    console.log('  POST /api/auth/recovery-codes')
+    console.log('  POST /api/auth/reset-password')
     console.log('  ...and more')
   })
 }

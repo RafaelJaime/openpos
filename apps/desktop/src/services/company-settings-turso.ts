@@ -17,6 +17,8 @@ export interface CompanySettings {
   email?: string
   website?: string
   receiptFooter?: string
+  bbvaTpvEnabled?: boolean
+  paymentConceptTemplate?: string
   createdAt: string
   updatedAt: string
 }
@@ -59,6 +61,8 @@ interface DatabaseCompanySettings {
   email?: string
   website?: string
   receipt_footer?: string
+  bbva_tpv_enabled?: number
+  payment_concept_template?: string
   created_at: string
   updated_at: string
 }
@@ -89,6 +93,8 @@ export class CompanySettingsService {
       email: dbSettings.email,
       website: dbSettings.website,
       receiptFooter: dbSettings.receipt_footer,
+      bbvaTpvEnabled: Boolean(dbSettings.bbva_tpv_enabled),
+      paymentConceptTemplate: dbSettings.payment_concept_template,
       createdAt: dbSettings.created_at,
       updatedAt: dbSettings.updated_at,
     }
@@ -116,6 +122,8 @@ export class CompanySettingsService {
           email: undefined, // Not in public response
           website: undefined, // Not in public response
           receiptFooter: undefined, // Not in public response
+          bbvaTpvEnabled: false, // Not in public response
+          paymentConceptTemplate: undefined, // Not in public response
           createdAt: '', // Not needed
           updatedAt: '', // Not needed
         }
@@ -221,6 +229,16 @@ export class CompanySettingsService {
       if (updates.website !== undefined) {
         updateFields.push('website = ?')
         updateValues.push(updates.website || null)
+      }
+
+      if (updates.bbvaTpvEnabled !== undefined) {
+        updateFields.push('bbva_tpv_enabled = ?')
+        updateValues.push(updates.bbvaTpvEnabled ? 1 : 0)
+      }
+
+      if (updates.paymentConceptTemplate !== undefined) {
+        updateFields.push('payment_concept_template = ?')
+        updateValues.push(updates.paymentConceptTemplate || null)
       }
 
       updateFields.push('updated_at = ?')

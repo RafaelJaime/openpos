@@ -1,20 +1,22 @@
-const { beforeEach, describe, expect, it } = require('bun:test')
-const { Database } = require('bun:sqlite')
-const { createSyncManager } = require('./sync-manager.cjs')
+import { beforeEach, describe, expect, it } from 'vitest'
+import { DatabaseSync as Database } from 'node:sqlite'
+const { createSyncManager } = await import('@openpos/sync')
 
 function createRemoteClient(database) {
   return {
     async execute(sql, params = []) {
-      const statement = database.prepare(sql)
+      const statementSql = typeof sql === 'string' ? sql : sql.sql
+      const statementParams = typeof sql === 'string' ? params : sql.args ?? []
+      const statement = database.prepare(statementSql)
 
-      if (/^\s*(select|pragma)\b/i.test(sql)) {
+      if (/^\s*(select|pragma)\b/i.test(statementSql)) {
         return {
           columns: [],
-          rows: statement.all(...params),
+          rows: statement.all(...statementParams),
         }
       }
 
-      const result = statement.run(...params)
+      const result = statement.run(...statementParams)
       return {
         columns: [],
         rows: [],
@@ -81,6 +83,35 @@ function createLocalDatabase() {
       updated_at TEXT NOT NULL,
       created_by INTEGER,
       deleted_at TEXT
+    );
+
+    CREATE TABLE categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      image TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      parent_id INTEGER
+    );
+
+    CREATE TABLE promotions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      percent REAL,
+      buy_n INTEGER,
+      pay_m INTEGER,
+      scope_type TEXT NOT NULL,
+      scope_value TEXT,
+      combinable INTEGER NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      priority INTEGER NOT NULL DEFAULT 0,
+      start_date TEXT,
+      end_date TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE sync_outbox (

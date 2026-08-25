@@ -11,6 +11,10 @@ interface DialogProps {
   children: ComponentChildren
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
   closeOnOutsideClick?: boolean
+  closeOnEscape?: boolean
+  // Edge-to-edge, full-height on mobile (normal centered card on >= sm).
+  mobileFullScreen?: boolean
+  hideCloseButton?: boolean
 }
 
 interface DialogConfirmProps {
@@ -38,7 +42,17 @@ export function handleDialogOutsideClick(closeOnOutsideClick: boolean, onClose: 
   }
 }
 
-export function Dialog({ isOpen, onClose, title, children, size = 'md', closeOnOutsideClick = true }: DialogProps) {
+export function Dialog({
+  isOpen,
+  onClose,
+  title,
+  children,
+  size = 'md',
+  closeOnOutsideClick = true,
+  closeOnEscape = true,
+  mobileFullScreen = false,
+  hideCloseButton = false,
+}: DialogProps) {
   const [isAnimating, setIsAnimating] = useState(false)
 
   useEffect(() => {
@@ -50,13 +64,14 @@ export function Dialog({ isOpen, onClose, title, children, size = 'md', closeOnO
   }, [isOpen])
 
   useEffect(() => {
+    if (!closeOnEscape) return
     const handleEscape = (e: KeyboardEvent) => {
       handleDialogEscape(e, isOpen, onClose)
     }
 
     document.addEventListener('keydown', handleEscape)
     return () => document.removeEventListener('keydown', handleEscape)
-  }, [isOpen, onClose])
+  }, [isOpen, onClose, closeOnEscape])
 
   useEffect(() => {
     if (!isOpen || size !== 'full') return
@@ -86,11 +101,19 @@ export function Dialog({ isOpen, onClose, title, children, size = 'md', closeOnO
         aria-label="Close dialog"
       />
 
-      <div class="pointer-events-none relative z-10 flex min-h-full items-center justify-center p-4">
+      <div
+        class={clsx(
+          'pointer-events-none relative z-10 flex min-h-full justify-center',
+          mobileFullScreen ? 'items-stretch p-0 sm:items-center sm:p-4' : 'items-center p-4',
+        )}
+      >
         <div
           class={clsx(
-            'pointer-events-auto relative w-full bg-canvas rounded-cards border border-fog-border shadow-sm',
+            'pointer-events-auto relative w-full bg-canvas shadow-sm',
             'transition-all duration-200 transform',
+            mobileFullScreen
+              ? 'min-h-full rounded-none border-0 sm:min-h-0 sm:rounded-cards sm:border sm:border-fog-border'
+              : 'rounded-cards border border-fog-border',
             isAnimating ? 'scale-100 opacity-100' : 'scale-95 opacity-0',
             sizeClasses[size],
           )}
@@ -100,19 +123,21 @@ export function Dialog({ isOpen, onClose, title, children, size = 'md', closeOnO
           {title && (
             <div class="flex items-center justify-between p-6 border-b border-fog-border">
               <h3 class="text-lg font-semibold text-void">{title}</h3>
-              <button
-                type="button"
-                onClick={onClose}
-                class="p-2 text-graphite hover:text-void focus:outline-none focus:ring-2 focus:ring-void rounded-buttons"
-              >
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M6 18 18 6M6 6l12 12" />
-                </svg>
-              </button>
+              {!hideCloseButton && (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  class="p-2 text-graphite hover:text-void focus:outline-none focus:ring-2 focus:ring-void rounded-buttons"
+                >
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M6 18 18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
             </div>
           )}
 
-          <div class="p-6">{children}</div>
+          <div class={mobileFullScreen ? 'p-4 sm:p-6' : 'p-6'}>{children}</div>
         </div>
       </div>
     </div>
