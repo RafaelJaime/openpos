@@ -15,11 +15,10 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "paths": {
-      "@tursodatabase/serverless": ["../apps/desktop/node_modules/@tursodatabase/serverless"],
       "bcryptjs": ["../apps/desktop/node_modules/bcryptjs"]
     },
     "lib": ["ES2023"],
-    "types": ["node", "bun-types"],
+    "types": ["node"],
     "noEmit": true
   },
   "include": ["**/*.ts"]

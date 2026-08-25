@@ -75,15 +75,10 @@ function resolveDesktopConnectionConfig({
   processEnv = process.env,
   envConfig = {},
   defaultApiUrl,
+  connectionRemote = {},
 } = {}) {
-  const remoteUrl =
-    normalizeString(runtimeConfig.tursoDatabaseUrl) ||
-    normalizeString(processEnv.TURSO_DATABASE_URL) ||
-    normalizeString(envConfig.TURSO_DATABASE_URL)
-  const remoteAuthToken =
-    normalizeString(runtimeConfig.tursoAuthToken) ||
-    normalizeString(processEnv.TURSO_AUTH_TOKEN) ||
-    normalizeString(envConfig.TURSO_AUTH_TOKEN)
+  const remoteUrl = normalizeString(connectionRemote.url)
+  const remoteAuthToken = normalizeString(connectionRemote.authToken)
   const apiUrl =
     normalizeString(runtimeConfig.apiUrl) ||
     normalizeString(processEnv.VITE_API_URL) ||
@@ -96,34 +91,17 @@ function resolveDesktopConnectionConfig({
       : normalizeString(envConfig.VITE_API_URL) || normalizeString(defaultApiUrl)
         ? 'bundled'
         : runtimeConfigSource
-  const printStationId =
-    normalizeString(runtimeConfig.printStationId) ||
-    normalizeString(runtimeConfig.print_station_id) ||
-    normalizeString(processEnv.OPENPOS_PRINT_STATION_ID) ||
-    normalizeString(envConfig.OPENPOS_PRINT_STATION_ID)
-  const printStationName =
-    normalizeString(runtimeConfig.printStationName) ||
-    normalizeString(runtimeConfig.print_station_name) ||
-    normalizeString(processEnv.OPENPOS_PRINT_STATION_NAME) ||
-    normalizeString(envConfig.OPENPOS_PRINT_STATION_NAME) ||
-    printStationId
-
   return {
     remote: {
       url: remoteUrl,
       authToken: remoteAuthToken,
-      configured: Boolean(remoteUrl && remoteAuthToken),
+      configured: Boolean(remoteUrl && (remoteAuthToken || remoteUrl.startsWith('file:'))),
     },
     api: {
       url: apiUrl,
       configured: Boolean(apiUrl),
       source: apiSource,
       configPath: normalizeString(configPath) || '',
-    },
-    printStation: {
-      id: printStationId || '',
-      name: printStationName || '',
-      configured: Boolean(printStationId),
     },
   }
 }
@@ -132,7 +110,6 @@ function createPublicConnectionConfig(connectionConfig) {
   return {
     remoteConfigured: Boolean(connectionConfig?.remote?.configured),
     apiConfigured: Boolean(connectionConfig?.api?.configured),
-    printStationConfigured: Boolean(connectionConfig?.printStation?.configured),
   }
 }
 

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'bun:test'
+import { beforeEach, describe, expect, it } from 'vitest'
 import {
   getApiBaseUrl,
   getApiUrl,
@@ -67,6 +67,7 @@ describe('api-config', () => {
 
     await expect(getDesktopApiConfig()).resolves.toEqual({
       apiUrl: 'https://runtime-api.example.com',
+      connectionKey: '',
       configPath: '/home/ana/.config/OpenPOS/config.json',
       configSource: 'userData',
       userDataConfigPath: '/home/ana/.config/OpenPOS/config.json',

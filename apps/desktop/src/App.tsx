@@ -8,6 +8,7 @@ import { type DesktopFirstRunStatus, requireDesktopApi } from './lib/desktop'
 import { isDesktop } from './lib/platform'
 import Analytics from './pages/Analytics'
 import Categories from './pages/Categories'
+import ConnectionSetup from './pages/ConnectionSetup'
 import Customers from './pages/Customers'
 import Dashboard from './pages/Dashboard'
 import FirstRunSync from './pages/FirstRunSync'
@@ -15,18 +16,26 @@ import Members from './pages/Members'
 import Orders from './pages/Orders'
 import Products from './pages/Products'
 import Promotions from './pages/Promotions'
+import ResetPassword from './pages/ResetPassword'
 import Settings from './pages/Settings'
 import SignIn from './pages/SignIn'
+import { getStoredConnectionKey } from './services/connections'
 import { appSettingsStore } from './stores/appSettings/appSettingsStore'
 import { authActions } from './stores/auth/authActions'
 import { languageActions } from './stores/language/languageActions'
 import './App.css'
+
+const isPasswordResetPage =
+  !isDesktop && typeof window !== 'undefined' && window.location.pathname.replace(/\/+$/, '') === '/reset-password'
 
 function App() {
   const [currentPage, setCurrentPage] = useState('dashboard')
   const [startupStatus, setStartupStatus] = useState<DesktopFirstRunStatus | null>(null)
   const [isStartupLoading, setIsStartupLoading] = useState(true)
   const [isRetryingStartup, setIsRetryingStartup] = useState(false)
+  const [webNeedsConnection, setWebNeedsConnection] = useState(
+    () => !isDesktop && !isPasswordResetPage && !getStoredConnectionKey(),
+  )
   const { isAuthenticated, isLoading } = useAuth()
 
   // Initialize auth, language, and app settings on app start
@@ -37,7 +46,21 @@ function App() {
       await languageActions.initializeLanguage()
       await appSettingsStore.initialize()
 
+      if (isPasswordResetPage) {
+        if (!isCancelled) {
+          setIsStartupLoading(false)
+        }
+        return
+      }
+
       if (!isDesktop) {
+        if (!getStoredConnectionKey()) {
+          if (!isCancelled) {
+            setWebNeedsConnection(true)
+            setIsStartupLoading(false)
+          }
+          return
+        }
         await authActions.initializeAuth()
         if (!isCancelled) {
           setIsStartupLoading(false)
@@ -117,19 +140,69 @@ function App() {
     }
   }
 
+  const handleConnectionResolved = async (status?: DesktopFirstRunStatus) => {
+    if (!isDesktop) {
+      setWebNeedsConnection(false)
+      await authActions.initializeAuth()
+      return
+    }
+
+    let nextStatus = status || (await requireDesktopApi().startup.getStatus())
+    setStartupStatus(nextStatus)
+
+    if (
+      nextStatus.status !== 'readyForSignIn' &&
+      nextStatus.status !== 'needsConnection' &&
+      nextStatus.status !== 'needsEmergencyKit'
+    ) {
+      nextStatus = await requireDesktopApi().startup.initialize()
+      setStartupStatus(nextStatus)
+    }
+
+    if (nextStatus.status === 'readyForSignIn') {
+      await appSettingsStore.initialize(true)
+      await authActions.initializeAuth()
+    }
+  }
+
   const handleNavigate = (page: string) => {
     setCurrentPage(page)
   }
+
+  const needsConnectionSetup =
+    webNeedsConnection ||
+    (isDesktop &&
+      !isAuthenticated &&
+      Boolean(startupStatus) &&
+      (startupStatus?.status === 'needsConnection' || startupStatus?.status === 'needsEmergencyKit'))
 
   // Show loading spinner while checking authentication
   if (isStartupLoading || isLoading) {
     return <FullPageLoader />
   }
 
+  if (needsConnectionSetup) {
+    return (
+      <>
+        <ConnectionSetup status={startupStatus} onResolved={handleConnectionResolved} />
+        <Toaster position="top-right" />
+      </>
+    )
+  }
+
   if (isDesktop && !isAuthenticated && startupStatus && startupStatus.status !== 'readyForSignIn') {
     return (
       <>
         <FirstRunSync status={startupStatus} isRetrying={isRetryingStartup} onRetry={handleRetryStartup} />
+        <Toaster position="top-right" />
+      </>
+    )
+  }
+
+  if (isPasswordResetPage) {
+    return (
+      <>
+        <ResetPassword />
         <Toaster position="top-right" />
       </>
     )

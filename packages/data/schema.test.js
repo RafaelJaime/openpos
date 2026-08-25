@@ -1,10 +1,19 @@
-const { describe, expect, it } = require('bun:test')
-const { replicatedTables, replicatedTablesByName, schema } = require('./src')
+import { describe, expect, it } from 'vitest'
+const { replicatedTables, replicatedTablesByName, schema } = await import('./src/index.js')
 
 describe('@openpos/data Drizzle schema exports', () => {
   it('exposes the OpenPOS schema and derived replicated table metadata', () => {
     expect(typeof schema).toBe('object')
     expect(schema.users).toBeDefined()
+    expect(schema.passwordRecoveryCodes).toBeDefined()
+    expect(schema.passwordResetTokens).toBeDefined()
+    expect(schema.passwordResetSettings).toBeDefined()
+    expect(schema.connectionMeta).toBeDefined()
+    expect(schema.databaseSettings).toBeDefined()
+    expect(schema.syncMetadata).toBeDefined()
+    expect(schema.syncOutbox).toBeDefined()
+    expect(schema.syncState).toBeDefined()
+    expect(schema.orderSyncQueue).toBeDefined()
     expect(schema.products).toBeDefined()
     expect(replicatedTables.map((table) => table.tableName)).toEqual([
       'users',
