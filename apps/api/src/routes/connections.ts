@@ -4,6 +4,7 @@
  * POST /api/connections              — create a store (returns key + seed once)
  * POST /api/connections/join         — join with key + seed
  * POST /api/connections/import       — bind an existing database URL + token
+ * GET  /api/connections/default      — deployment-wide default key, if configured
  * GET  /api/connections/current      — active connection metadata (JWT)
  */
 
@@ -19,6 +20,13 @@ import {
 import { authMiddleware } from '../middleware/auth.js'
 
 export const connectionsRouter = new Hono()
+
+// Single-store deployments can set OPENPOS_DEFAULT_CONNECTION_KEY so web
+// clients connect automatically instead of asking every device for a key.
+connectionsRouter.get('/default', (c) => {
+  const key = (process.env.OPENPOS_DEFAULT_CONNECTION_KEY || '').trim()
+  return c.json({ key: key || null })
+})
 
 connectionsRouter.post('/', async (c) => {
   let body: { storeName?: string; adminName?: string; adminEmail?: string; adminPassword?: string }
