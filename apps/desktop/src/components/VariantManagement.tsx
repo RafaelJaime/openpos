@@ -12,20 +12,21 @@ import { SpinnerIcon } from './ui/icons'
 
 interface ProductVariantRowProps {
   variant: ProductVariant
+  currencySymbol?: string
   onEdit: (variant: ProductVariant) => void
   onDelete: (variantId: string) => void
 }
 
-export function ProductVariantRow({ variant, onEdit, onDelete }: ProductVariantRowProps) {
+export function ProductVariantRow({ variant, currencySymbol = '$', onEdit, onDelete }: ProductVariantRowProps) {
   const { t } = useTranslation()
 
   const getStockColor = (stock: number) => {
     if (stock === 0) return '  text-void border-fog-border'
-    if (stock < 10) return '  text-void border-fog-border'
+    if (stock <= 3) return '  text-void border-fog-border'
     return '  text-void border-fog-border'
   }
 
-  const formatCurrency = (amount: number) => `$${amount.toFixed(2)}`
+  const formatCurrency = (amount: number) => `${currencySymbol}${amount.toFixed(2)}`
 
   return (
     <div class="grid grid-cols-12 gap-4 p-4 bg-chalk rounded-cards hover:bg-chalk transition-all">
@@ -88,11 +89,19 @@ interface EditVariantModalProps {
   variant: ProductVariant | null
   productId: string
   isOpen: boolean
+  currencySymbol?: string
   onClose: () => void
   onSave: (variant: ProductVariant) => void
 }
 
-export function EditVariantModal({ variant, productId, isOpen, onClose, onSave }: EditVariantModalProps) {
+export function EditVariantModal({
+  variant,
+  productId,
+  isOpen,
+  currencySymbol = '$',
+  onClose,
+  onSave,
+}: EditVariantModalProps) {
   const { t } = useTranslation()
   const [formData, setFormData] = useState<ProductVariantInput>({
     parentProductId: productId,
@@ -175,7 +184,7 @@ export function EditVariantModal({ variant, productId, isOpen, onClose, onSave }
     }
   }
 
-  const formatCurrency = (amount: number) => `$${amount.toFixed(2)}`
+  const formatCurrency = (amount: number) => `${currencySymbol}${amount.toFixed(2)}`
 
   return (
     <Dialog
