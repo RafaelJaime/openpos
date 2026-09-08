@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { ChevronLeftIcon, ChevronRightIcon } from '../components/ui/icons'
 import { DashboardSkeleton } from '../components/ui/PageLoader'
 import { useTranslation } from '../hooks/useTranslation'
+import { companySettingsService } from '../services/company-settings-turso'
 import { dashboardService } from '../services/dashboard-turso'
 
 interface DashboardProps {
@@ -93,7 +94,15 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const [selectedDate, setSelectedDate] = useState(() => formatDateInputValue(new Date()))
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false)
   const [visibleMonth, setVisibleMonth] = useState(() => parseDateInputValue(selectedDate))
+  const [currencySymbol, setCurrencySymbol] = useState('$')
   const datePickerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    companySettingsService
+      .getSettings()
+      .then((settings) => setCurrencySymbol(settings.currencySymbol || '$'))
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     let shouldUpdate = true
@@ -154,7 +163,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   }, [isDatePickerOpen])
 
   const formatCurrency = (amount: number) => {
-    return `$${amount.toFixed(2)}`
+    return `${currencySymbol}${amount.toFixed(2)}`
   }
 
   const selectedDateLabel = formatPickerLabel(

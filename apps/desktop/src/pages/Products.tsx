@@ -27,6 +27,7 @@ import { useTranslation } from '../hooks/useTranslation'
 import { normalizeBarcode } from '../lib/barcodes'
 import { fileToCompressedDataUrl } from '../lib/image-encode'
 import { categoryService } from '../services/categories-turso'
+import { companySettingsService } from '../services/company-settings-turso'
 import {
   DESKTOP_REMOTE_SESSION_UNAVAILABLE_MESSAGE,
   deleteProductImage,
@@ -38,6 +39,30 @@ import { type ProductVariant, productVariantsService } from '../services/product
 import { PRODUCT_CATEGORIES, type Product, type ProductWithVariants, productService } from '../services/products-turso'
 
 type TranslateFunction = (key: string, params?: Record<string, string | number | boolean>) => string
+
+const LOW_STOCK_THRESHOLD = 3
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
+const PAGE_SIZE_STORAGE_KEY = 'openpos.products.pageSize'
+const PAGE_STORAGE_KEY = 'openpos.products.page'
+
+const readStoredPageSize = (): number => {
+  try {
+    const stored = Number(localStorage.getItem(PAGE_SIZE_STORAGE_KEY))
+    return PAGE_SIZE_OPTIONS.includes(stored) ? stored : PAGE_SIZE_OPTIONS[0]
+  } catch {
+    return PAGE_SIZE_OPTIONS[0]
+  }
+}
+
+const readStoredPage = (): number => {
+  try {
+    const stored = Number(sessionStorage.getItem(PAGE_STORAGE_KEY))
+    return Number.isInteger(stored) && stored > 0 ? stored : 1
+  } catch {
+    return 1
+  }
+}
 
 const getCategoryIcon = (category: string): string => {
   const icons: { [key: string]: string } = {
@@ -77,6 +102,7 @@ interface EditProductModalProps {
   product: Product | null
   isOpen: boolean
   resolvedImageUrl?: string
+  currencySymbol?: string
   onClose: () => void
   onSave: (product: Product, options?: { warning?: string }) => void
 }
@@ -111,7 +137,14 @@ function getErrorMessage(message: string, t: TranslateFunction): string {
   return message || t('errors.generic')
 }
 
-function EditProductModal({ product, isOpen, resolvedImageUrl, onClose, onSave }: EditProductModalProps) {
+function EditProductModal({
+  product,
+  isOpen,
+  resolvedImageUrl,
+  currencySymbol = '$',
+  onClose,
+  onSave,
+}: EditProductModalProps) {
   const { t } = useTranslation()
   const panelClass = 'rounded-cards border border-fog-border bg-canvas p-6 '
 
@@ -573,7 +606,9 @@ function EditProductModal({ product, isOpen, resolvedImageUrl, onClose, onSave }
                   </span>
                 </div>
                 <div class="mt-1 text-sm text-void ">
-                  {t('products.profitPerUnit', { amount: `$${(formData.price - formData.cost).toFixed(2)}` })}
+                  {t('products.profitPerUnit', {
+                    amount: `${currencySymbol}${(formData.price - formData.cost).toFixed(2)}`,
+                  })}
                 </div>
               </div>
             )}
@@ -616,10 +651,11 @@ export default function Products() {
   const [searchQuery, setSearchQuery] = useState('')
 
   // Pagination state
-  const [currentPage, setCurrentPage] = useState(1)
+  const [currentPage, setCurrentPage] = useState(readStoredPage)
   const [totalCount, setTotalCount] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
-  const [pageSize] = useState(10)
+  const [pageSize, setPageSize] = useState(readStoredPageSize)
+  const [currencySymbol, setCurrencySymbol] = useState('$')
   const [resolvedImageUrls, setResolvedImageUrls] = useState<Record<string, string>>({})
 
   // Variant state
@@ -634,13 +670,25 @@ export default function Products() {
   const canManageProducts = currentUser && (hasRole('admin') || hasRole('manager') || hasPermission('products.view'))
 
   useEffect(() => {
-    loadProducts()
+    loadProducts(currentPage)
+    companySettingsService
+      .getSettings()
+      .then((settings) => setCurrencySymbol(settings.currencySymbol || '$'))
+      .catch(() => {})
     return () => {
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current)
       }
     }
   }, [])
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(PAGE_STORAGE_KEY, String(currentPage))
+    } catch {
+      // Persisting the page is best-effort
+    }
+  }, [currentPage])
 
   const syncResolvedImageUrls = async (productList: Product[]) => {
     const keys = Array.from(new Set(productList.map((product) => product.image?.trim()).filter(Boolean))) as string[]
@@ -669,7 +717,24 @@ export default function Products() {
     }
   }
 
-  const loadProducts = async (page: number = 1) => {
+  const handlePageSizeChange = (e: Event) => {
+    const size = parseInt((e.target as HTMLSelectElement).value, 10)
+    if (!PAGE_SIZE_OPTIONS.includes(size)) return
+    try {
+      localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(size))
+    } catch {
+      // Persisting the preference is best-effort
+    }
+    setPageSize(size)
+    setCurrentPage(1)
+    if (searchQuery.trim()) {
+      performSearch(searchQuery, 1, size)
+    } else {
+      loadProducts(1, size)
+    }
+  }
+
+  const loadProducts = async (page: number = 1, size: number = pageSize) => {
     if (!canManageProducts) {
       setError(t('errors.unauthorized'))
       setIsLoading(false)
@@ -679,9 +744,15 @@ export default function Products() {
     try {
       setIsLoading(true)
       const [paginatedResult, allProductsList] = await Promise.all([
-        productService.getProductsPaginated(page, pageSize),
+        productService.getProductsPaginated(page, size),
         productService.getProducts(), // For total count and filtering
       ])
+
+      if (page > 1 && paginatedResult.products.length === 0 && paginatedResult.totalCount > 0) {
+        // Stored page is out of range (e.g. after deletions) — fall back to page 1
+        loadProducts(1, size)
+        return
+      }
 
       setProducts(paginatedResult.products)
       setAllProducts(allProductsList)
@@ -697,11 +768,11 @@ export default function Products() {
     }
   }
 
-  const performSearch = async (query: string, page: number) => {
+  const performSearch = async (query: string, page: number, size: number = pageSize) => {
     try {
       setIsSearching(true)
       setError('')
-      const searchResults = await productService.searchProductsPaginated(query, page, pageSize)
+      const searchResults = await productService.searchProductsPaginated(query, page, size)
       setProducts(searchResults.products)
       setTotalCount(searchResults.totalCount)
       setTotalPages(searchResults.totalPages)
@@ -905,7 +976,7 @@ export default function Products() {
     if (stock === 0) {
       return 'border border-fog-border bg-chalk text-void '
     }
-    if (stock < 10) {
+    if (stock <= LOW_STOCK_THRESHOLD) {
       return 'border border-fog-border bg-chalk text-void '
     }
     return 'border border-fog-border bg-chalk text-void '
@@ -917,12 +988,12 @@ export default function Products() {
 
   const getStockIcon = (stock: number) => {
     if (stock === 0) return '❌'
-    if (stock < 10) return '⚠️'
+    if (stock <= LOW_STOCK_THRESHOLD) return '⚠️'
     return '✅'
   }
 
   const formatCurrency = (amount: number) => {
-    return `$${amount.toFixed(2)}`
+    return `${currencySymbol}${amount.toFixed(2)}`
   }
 
   if (!canManageProducts) {
@@ -951,11 +1022,25 @@ export default function Products() {
           {totalPages > 1 && ` • ${t('products.pageXofY', { current: currentPage, total: totalPages })}`}
           {searchQuery && ` • ${t('products.searchingFor')} "${searchQuery}"`}
         </p>
-        {(hasPermission('products.create') || hasRole('admin') || hasRole('manager')) && (
-          <Button class="w-full sm:w-auto" onClick={handleCreateProduct}>
-            {t('products.addProduct')}
-          </Button>
-        )}
+        <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+          <div class="flex items-center gap-2">
+            <label class="whitespace-nowrap text-sm text-graphite" for="products-page-size">
+              {t('products.perPage')}
+            </label>
+            <Select
+              id="products-page-size"
+              value={String(pageSize)}
+              onChange={handlePageSizeChange}
+              options={PAGE_SIZE_OPTIONS.map((size) => ({ value: String(size), label: String(size) }))}
+              class="w-24"
+            />
+          </div>
+          {(hasPermission('products.create') || hasRole('admin') || hasRole('manager')) && (
+            <Button class="w-full sm:w-auto" onClick={handleCreateProduct}>
+              {t('products.addProduct')}
+            </Button>
+          )}
+        </div>
       </div>
 
       <div class="mb-6">
@@ -1154,10 +1239,12 @@ export default function Products() {
                     </TableCell>
                     <TableCell>
                       <div class="text-sm font-medium text-void ">{formatCurrency(product.cost)}</div>
-                      <div class="mt-0.5 text-[11px] leading-tight text-graphite ">
-                        {t('products.profitMargin')}:{' '}
-                        {(((product.price - product.cost) / product.cost) * 100).toFixed(1)}%
-                      </div>
+                      {product.cost > 0 && (
+                        <div class="mt-0.5 text-[11px] leading-tight text-graphite ">
+                          {t('products.profitMargin')}:{' '}
+                          {(((product.price - product.cost) / product.cost) * 100).toFixed(1)}%
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>
                       {productWithVariants?.totalStock !== undefined ? (
@@ -1239,6 +1326,7 @@ export default function Products() {
                                 <ProductVariantRow
                                   key={variant.id}
                                   variant={variant}
+                                  currencySymbol={currencySymbol}
                                   onEdit={handleEditVariant}
                                   onDelete={handleDeleteVariant}
                                 />
@@ -1293,6 +1381,7 @@ export default function Products() {
         product={editingProduct}
         isOpen={isModalOpen}
         resolvedImageUrl={editingProduct?.image ? resolvedImageUrls[editingProduct.image] : undefined}
+        currencySymbol={currencySymbol}
         onClose={() => {
           setIsModalOpen(false)
           setEditingProduct(null)
@@ -1317,6 +1406,7 @@ export default function Products() {
             variant={editingVariant}
             productId={editingProduct.id}
             isOpen={isVariantModalOpen}
+            currencySymbol={currencySymbol}
             onClose={() => {
               setIsVariantModalOpen(false)
               setEditingVariant(null)

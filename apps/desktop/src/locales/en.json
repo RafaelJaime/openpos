@@ -219,6 +219,7 @@
     "invalidImageType": "Unsupported image type. Allowed types: JPEG, PNG, WEBP.",
     "imageTooLarge": "Image exceeds maximum size of 5 MB.",
     "productsTotal": "products total",
+    "perPage": "Per page",
     "pageXofY": "Page {{current}} of {{total}}",
     "searchingFor": "Searching for",
     "accessDenied": "Access Denied",
