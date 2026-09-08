@@ -38,6 +38,19 @@ export function clearStoredConnectionKey(): void {
   localStorage.removeItem(CONNECTION_KEY_STORAGE)
 }
 
+/**
+ * Deployment-wide default key (OPENPOS_DEFAULT_CONNECTION_KEY on the API).
+ * Lets single-store web deployments connect devices automatically.
+ */
+export async function fetchDefaultConnectionKey(): Promise<string> {
+  try {
+    const result = await requestApiJson<{ key?: string | null }>('/api/connections/default')
+    return result?.key?.trim() || ''
+  } catch {
+    return ''
+  }
+}
+
 export async function createStoreConnection(input: ConnectionCreateInput): Promise<ConnectionResult> {
   if (isDesktop) {
     const result = await requireDesktopApi().connection.create(input)

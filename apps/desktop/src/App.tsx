@@ -19,7 +19,7 @@ import Promotions from './pages/Promotions'
 import ResetPassword from './pages/ResetPassword'
 import Settings from './pages/Settings'
 import SignIn from './pages/SignIn'
-import { getStoredConnectionKey } from './services/connections'
+import { fetchDefaultConnectionKey, getStoredConnectionKey, storeConnectionKey } from './services/connections'
 import { appSettingsStore } from './stores/appSettings/appSettingsStore'
 import { authActions } from './stores/auth/authActions'
 import { languageActions } from './stores/language/languageActions'
@@ -77,11 +77,15 @@ function App() {
 
       if (!isDesktop) {
         if (!getStoredConnectionKey()) {
-          if (!isCancelled) {
+          const defaultKey = await fetchDefaultConnectionKey()
+          if (isCancelled) return
+          if (!defaultKey) {
             setWebNeedsConnection(true)
             setIsStartupLoading(false)
+            return
           }
-          return
+          storeConnectionKey(defaultKey)
+          setWebNeedsConnection(false)
         }
         await authActions.initializeAuth()
         if (!isCancelled) {
