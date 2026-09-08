@@ -28,8 +28,30 @@ import './App.css'
 const isPasswordResetPage =
   !isDesktop && typeof window !== 'undefined' && window.location.pathname.replace(/\/+$/, '') === '/reset-password'
 
+const CURRENT_PAGE_STORAGE_KEY = 'openpos.currentPage'
+const KNOWN_PAGES = new Set([
+  'dashboard',
+  'orders',
+  'products',
+  'categories',
+  'promotions',
+  'customers',
+  'members',
+  'analytics',
+  'settings',
+])
+
+const readStoredCurrentPage = (): string => {
+  try {
+    const stored = sessionStorage.getItem(CURRENT_PAGE_STORAGE_KEY) || ''
+    return KNOWN_PAGES.has(stored) ? stored : 'dashboard'
+  } catch {
+    return 'dashboard'
+  }
+}
+
 function App() {
-  const [currentPage, setCurrentPage] = useState('dashboard')
+  const [currentPage, setCurrentPage] = useState(readStoredCurrentPage)
   const [startupStatus, setStartupStatus] = useState<DesktopFirstRunStatus | null>(null)
   const [isStartupLoading, setIsStartupLoading] = useState(true)
   const [isRetryingStartup, setIsRetryingStartup] = useState(false)
@@ -167,6 +189,11 @@ function App() {
 
   const handleNavigate = (page: string) => {
     setCurrentPage(page)
+    try {
+      sessionStorage.setItem(CURRENT_PAGE_STORAGE_KEY, page)
+    } catch {
+      // Persisting the page is best-effort
+    }
   }
 
   const needsConnectionSetup =
